@@ -1,0 +1,14 @@
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "git"
+decision = "deny"
+modes = ["plan", "autoEdit"]
+priority = 100
+denyMessage = "Git access is prohibited without explicit user command. If you see this message, it means you are going below the scope of the assigned task and should step back."
+
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "git"
+decision = "ask_user"
+modes = ["default"]
+priority = 100

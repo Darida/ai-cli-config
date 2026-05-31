@@ -1,0 +1,62 @@
+# Policy: Restrict command chaining (&&)
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = "&&"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Chaining commands with '&&' is not allowed. Perform commands sequentially to maintain observability."
+
+# Policy: Restrict command chaining (||)
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = "\\|\\|"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Chaining commands with '||' is not allowed. Perform commands sequentially to maintain observability."
+
+# Policy: Restrict command chaining (;)
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = ";"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Chaining commands with ';' is not allowed. Perform commands sequentially to maintain observability."
+
+# Policy: Restrict input redirection (<)
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = "<"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Input redirection with '<' is not allowed. Perform commands sequentially to maintain observability."
+
+# Policy: Restrict output redirection (>)
+[[rule]]
+toolName = "run_shell_command"
+commandRegex = ">"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Output redirection is restricted to prevent unauthorized file modifications. Use built-in tools or request file write operations explicitly."
+
+# Policy: Restrict 'awk'
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "awk"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Use standard text processing commands like 'grep', 'sed', or 'cut' for data manipulation instead."
+
+# Policy: Restrict inline Python execution
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "python3 -c"
+decision = "deny"
+modes = ["default"]
+priority = 100
+denyMessage = "Inline Python execution is restricted to prevent unmonitored code execution."
