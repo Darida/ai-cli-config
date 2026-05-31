@@ -1,0 +1,16 @@
+
+# Private session, credential, and state files
+
+oauth_creds.json
+
+state.json
+
+installation_id
+
+tmp/
+
+history/
+
+google_accounts.json
+projects.json
+trustedFolders.json

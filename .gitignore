@@ -1,0 +1,10 @@
+# 1. Ignore everything recursively across the entire home directory
+*
+**/
+
+# 2. Carve out an absolute exception to allow the .gemini folder and its contents
+!.gemini/
+!.gemini/**
+
+# 3. Ensure this root ignore file stays tracked
+!.gitignore
