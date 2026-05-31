@@ -1,0 +1,38 @@
+{
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    },
+    "disableAlwaysAllow": true
+  },
+  "ui": {
+    "theme": "Default",
+    "showStatusInTitle": true,
+    "escapePastedAtSymbols": true,
+    "footer": {
+      "hideContextPercentage": false
+    },
+    "showMemoryUsage": true,
+    "showModelInfoInChat": true,
+    "errorVerbosity": "full"
+  },
+  "general": {
+    "sessionRetention": {
+      "maxAge": "7d"
+    }
+  },
+  "context": {
+    "fileFiltering": {
+      "respectGitIgnore": false
+    }
+  },
+  "tools": {
+    "sandboxNetworkAccess": false,
+    "truncateToolOutputThreshold": 10000
+  },
+  "experimental": {
+    "modelSteering": true,
+    "autoMemory": true,
+    "generalistProfile": false
+  }
+}
