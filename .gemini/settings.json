@@ -14,12 +14,14 @@
     },
     "showMemoryUsage": true,
     "showModelInfoInChat": true,
-    "errorVerbosity": "full"
+    "errorVerbosity": "full",
+    "terminalBuffer": true
   },
   "general": {
     "sessionRetention": {
       "maxAge": "7d"
-    }
+    },
+    "vimMode": false
   },
   "context": {
     "fileFiltering": {

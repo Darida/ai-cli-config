@@ -10,7 +10,7 @@ denyMessage = "Chaining commands with '&&' is not allowed. Perform commands sequ
 # Policy: Restrict command chaining (||)
 [[rule]]
 toolName = "run_shell_command"
-commandRegex = "\\|\\|"
+argsPattern = "||"
 decision = "deny"
 modes = ["default"]
 priority = 100
@@ -19,7 +19,7 @@ denyMessage = "Chaining commands with '||' is not allowed. Perform commands sequ
 # Policy: Restrict command chaining (;)
 [[rule]]
 toolName = "run_shell_command"
-commandRegex = ";"
+argsPattern = ";"
 decision = "deny"
 modes = ["default"]
 priority = 100
@@ -28,7 +28,7 @@ denyMessage = "Chaining commands with ';' is not allowed. Perform commands seque
 # Policy: Restrict input redirection (<)
 [[rule]]
 toolName = "run_shell_command"
-commandRegex = "<"
+argsPattern = "<"
 decision = "deny"
 modes = ["default"]
 priority = 100
@@ -37,7 +37,7 @@ denyMessage = "Input redirection with '<' is not allowed. Perform commands seque
 # Policy: Restrict output redirection (>)
 [[rule]]
 toolName = "run_shell_command"
-commandRegex = ">"
+argsPattern = ">"
 decision = "deny"
 modes = ["default"]
 priority = 100
@@ -60,3 +60,4 @@ decision = "deny"
 modes = ["default"]
 priority = 100
 denyMessage = "Inline Python execution is restricted to prevent unmonitored code execution."
+n."

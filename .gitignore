@@ -1,10 +1,15 @@
-# 1. Ignore everything recursively across the entire home directory
+# 1. Ignore absolutely everything in the home directory by default
 *
 **/
 
-# 2. Carve out an absolute exception to allow the .gemini folder and its contents
-!.gemini/
-!.gemini/**
-
-# 3. Ensure this root ignore file stays tracked
+# 2. Track the .gitignore file itself
 !.gitignore
+
+# 3. Track only specific Gemini files
+!.gemini/
+!.gemini/policies
+!.gemini/settings.json
+
+# 4. Track only specific Claude files
+!.claude/
+!.claude/settings.json
