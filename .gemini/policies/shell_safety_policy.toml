@@ -60,4 +60,3 @@ decision = "deny"
 modes = ["default"]
 priority = 100
 denyMessage = "Inline Python execution is restricted to prevent unmonitored code execution."
-n."
