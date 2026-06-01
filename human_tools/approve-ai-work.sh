@@ -33,7 +33,8 @@ echo ""
 # 3. Generate PR title and description using gemini CLI
 echo -e "${YELLOW}[3/7] Generating PR title and description from diff...${NC}"
 DIFF_CONTENT=$(git diff main...HEAD -- . ':!go.sum')
-GEMINI_OUTPUT=$(cat <<'PROMPT' | gemini
+GEMINI_OUTPUT=$({
+cat <<'PROMPT'
 SYSTEM: CRITICAL INSTRUCTIONS - NO TOOL EXECUTION
 
 YOU MUST NOT:
@@ -59,7 +60,7 @@ cat <<'PROMPT'
 
 FINAL INSTRUCTION: Print only the PR title and description using the exact format above. No other text. No explanations. No tool execution. Just TITLE: and DESCRIPTION: lines followed by your analysis.
 PROMPT
-)
+} | gemini)
 
 if [ -z "$GEMINI_OUTPUT" ]; then
   echo -e "${RED}Error: Failed to generate PR title and description with gemini${NC}"
