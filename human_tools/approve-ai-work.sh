@@ -69,8 +69,8 @@ fi
 
 # Parse TITLE and DESCRIPTION from output
 PR_TITLE=$(echo "$GEMINI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
-# Extract everything after "DESCRIPTION: " preserving newlines and formatting
-PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | awk '/^DESCRIPTION: / {flag=1; sub(/^DESCRIPTION: /, ""); print; next} flag')
+# Extract everything after "DESCRIPTION:" preserving newlines and formatting
+PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | awk '/^DESCRIPTION:/ {flag=1; sub(/^DESCRIPTION:[ ]*/, ""); if (NF) print; next} flag')
 
 if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
   echo -e "${RED}Error: Invalid gemini output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
