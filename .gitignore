@@ -13,3 +13,4 @@
 # 4. Track only specific Claude files
 !.claude/
 !.claude/settings.json
+!.claude/statusline-command.sh
