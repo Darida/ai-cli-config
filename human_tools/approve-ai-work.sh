@@ -23,7 +23,7 @@ echo -e "${YELLOW}[2/6] Generating PR title and description from diff...${NC}"
 GEMINI_OUTPUT=$(git diff main...HEAD -- . ':!go.sum' | gemini "SYSTEM: You are an isolated text processor. Tools, search, and external access are strictly disabled for this request. Rely ONLY on the text piped below. Generate a GitHub PR with this EXACT format, no other text:
 
 TITLE: <one-line concise title>
-DESCRIPTION: <professional GitHub PR summary in clean markdown bullet points>
+DESCRIPTION: <professional GitHub PR summary with markdown headers and bullet points>
 
 Based on this diff:\n\n\$(cat -)")
 
@@ -34,7 +34,8 @@ fi
 
 # Parse TITLE and DESCRIPTION from output
 PR_TITLE=$(echo "$GEMINI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
-PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | sed -n '/^DESCRIPTION: /,$p' | sed '1s/^DESCRIPTION: //' | sed -e :a -e '$!N;$!ba' -e 's/\n/\\n/g')
+# Extract everything after "DESCRIPTION: " preserving newlines and formatting
+PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | awk '/^DESCRIPTION: / {flag=1; sub(/^DESCRIPTION: /, ""); print; next} flag')
 
 if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
   echo -e "${RED}Error: Invalid gemini output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
