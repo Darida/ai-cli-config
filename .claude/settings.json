@@ -1,7 +1,13 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(go mod *)",
+      "Bash(go test *)"
+    ],
     "defaultMode": "auto"
   },
+  "model": "haiku",
   "hooks": {
     "PreToolUse": [
       {
@@ -15,7 +21,6 @@
       }
     ]
   },
-  "model": "haiku",
   "statusLine": {
     "type": "command",
     "command": "bash /home/daridagm/.claude/statusline-command.sh"
