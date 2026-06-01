@@ -5,6 +5,10 @@
       "Bash(go mod *)",
       "Bash(go test *)"
     ],
+    "deny": [
+      "Bash(git branch -D*)",
+      "Bash(git branch --delete*)"
+    ],
     "defaultMode": "auto"
   },
   "model": "haiku",
