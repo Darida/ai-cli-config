@@ -9,8 +9,12 @@
 !.gemini/
 !.gemini/policies
 !.gemini/settings.json
+!.gemini/hooks/
+!.gemini/hooks/**
 
 # 4. Track only specific Claude files
 !.claude/
 !.claude/settings.json
 !.claude/statusline-command.sh
+!.claude/hooks/
+!.claude/hooks/**
