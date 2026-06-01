@@ -1,11 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git pull *)",
+      "Bash(git *)",
       "Bash(go mod *)",
-      "Bash(git add *)",
-      "Bash(git commit -m ' *)",
-      "Bash(git push *)",
       "Bash(go test *)"
     ],
     "defaultMode": "auto"
