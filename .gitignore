@@ -18,3 +18,7 @@
 !.claude/statusline-command.sh
 !.claude/hooks/
 !.claude/hooks/**
+
+# 5. Track human_tools scripts
+!human_tools/
+!human_tools/**
