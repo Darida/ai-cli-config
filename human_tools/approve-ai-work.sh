@@ -18,18 +18,37 @@ if ! git diff-index --quiet HEAD --; then
 fi
 echo -e "${GREEN}✓ No uncommitted changes${NC}\n"
 
-# 2. Generate PR description using gemini CLI
-echo -e "${YELLOW}[2/6] Generating PR description from diff...${NC}"
-PR_DESCRIPTION=$(git diff main...HEAD -- . ':!go.sum' | gemini "SYSTEM: You are an isolated text processor. Tools, search, and external access are strictly disabled for this request. Rely ONLY on the text piped below. Write a professional GitHub PR summary in clean markdown bullet points based on this diff:\n\n\$(cat -)")
-if [ -z "$PR_DESCRIPTION" ]; then
-  echo -e "${RED}Error: Failed to generate PR description with gemini${NC}"
+# 2. Generate PR title and description using gemini CLI
+echo -e "${YELLOW}[2/6] Generating PR title and description from diff...${NC}"
+GEMINI_OUTPUT=$(git diff main...HEAD -- . ':!go.sum' | gemini "SYSTEM: You are an isolated text processor. Tools, search, and external access are strictly disabled for this request. Rely ONLY on the text piped below. Generate a GitHub PR with this EXACT format, no other text:
+
+TITLE: <one-line concise title>
+DESCRIPTION: <professional GitHub PR summary in clean markdown bullet points>
+
+Based on this diff:\n\n\$(cat -)")
+
+if [ -z "$GEMINI_OUTPUT" ]; then
+  echo -e "${RED}Error: Failed to generate PR title and description with gemini${NC}"
   exit 1
 fi
-echo -e "${GREEN}✓ PR description generated${NC}\n"
+
+# Parse TITLE and DESCRIPTION from output
+PR_TITLE=$(echo "$GEMINI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
+PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | sed -n '/^DESCRIPTION: /,$p' | sed '1s/^DESCRIPTION: //' | sed -e :a -e '$!N;$!ba' -e 's/\n/\\n/g')
+
+if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
+  echo -e "${RED}Error: Invalid gemini output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
+  echo -e "${RED}Got:${NC}"
+  echo "$GEMINI_OUTPUT"
+  exit 1
+fi
+
+echo -e "${GREEN}✓ PR title and description generated${NC}"
+echo -e "  Title: $PR_TITLE\n"
 
 # 3. Create pull request
 echo -e "${YELLOW}[3/6] Creating pull request from ai-work to main...${NC}"
-PR_URL=$(gh pr create --base main --head ai-work --title "AI Work" --body "$PR_DESCRIPTION" --fill 2>&1 | grep -o 'https://github.com[^[:space:]]*' || true)
+PR_URL=$(gh pr create --base main --head ai-work --title "$PR_TITLE" --body "$PR_DESCRIPTION" --fill 2>&1 | grep -o 'https://github.com[^[:space:]]*' || true)
 if [ -z "$PR_URL" ]; then
   # Try to get the PR number if it already exists
   PR_NUMBER=$(gh pr view ai-work --json number --jq .number 2>/dev/null || true)
