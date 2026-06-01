@@ -1,9 +1,14 @@
 {
+  "permissions": {
+    "defaultMode": "auto"
+  },
   "model": "haiku",
   "statusLine": {
     "type": "command",
     "command": "bash /home/daridagm/.claude/statusline-command.sh"
   },
   "theme": "dark",
-  "verbose": false
+  "verbose": true,
+  "remoteControlAtStartup": true,
+  "useAutoModeDuringPlan": true
 }
