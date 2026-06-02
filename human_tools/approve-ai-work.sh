@@ -117,7 +117,7 @@ echo -e "${GREEN}✓ PR approved${NC}\n"
 
 # 7. Merge with squash
 echo -e "${YELLOW}[7/8] Merging PR with squash...${NC}"
-gh pr merge --squash --delete-branch --auto --commit-title "$PR_TITLE" --commit-body "$PR_DESCRIPTION" "$PR_URL" 2>/dev/null || gh pr merge --squash --delete-branch --commit-title "$PR_TITLE" --commit-body "$PR_DESCRIPTION" "$PR_URL" 2>/dev/null
+gh pr merge --squash --delete-branch --commit-title "$PR_TITLE" --commit-body "$PR_DESCRIPTION" "$PR_URL"
 echo -e "${GREEN}✓ PR merged with squash${NC}\n"
 
 # 8. Reset ai-work branch history
