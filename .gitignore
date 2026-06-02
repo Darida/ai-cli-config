@@ -7,6 +7,8 @@
 
 # 3. Track only specific Gemini files
 !.gemini/
+!.gemini/antigravity-cli/
+!.gemini/antigravity-cli/settings.json
 !.gemini/policies
 !.gemini/settings.json
 !.gemini/hooks/

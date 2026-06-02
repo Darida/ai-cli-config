@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "command(git commit)",
+      "command(git status)",
+      "command(git add)",
+      "command(git mv)",
+      "command(git diff)",
+      "command(git push origin ai-work)"
+    ]
+  },
+  "trustedWorkspaces": [
+    "/home/daridagm",
+    "/home/daridagm/pokemon_tamagotchi"
+  ]
+}
