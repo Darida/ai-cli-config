@@ -23,7 +23,7 @@ echo -e "${YELLOW}[2/8] Checking for and closing any existing PRs...${NC}"
 EXISTING_PR=$(gh pr list --head ai-work --base main --state open --json number --jq '.[0].number' 2>/dev/null || true)
 if [ -n "$EXISTING_PR" ]; then
   echo "  - Found existing PR #$EXISTING_PR, closing it..."
-  gh pr close "$EXISTING_PR" --delete-branch
+  gh pr close "$EXISTING_PR"
   echo -e "${GREEN}✓ Closed old PR #$EXISTING_PR${NC}"
 else
   echo -e "${GREEN}✓ No existing PRs to close${NC}"
@@ -117,7 +117,7 @@ echo -e "${GREEN}✓ PR approved${NC}\n"
 
 # 7. Merge with squash
 echo -e "${YELLOW}[7/8] Merging PR with squash...${NC}"
-gh pr merge --squash --delete-branch --auto "$PR_URL" 2>/dev/null || gh pr merge --squash --delete-branch "$PR_URL" 2>/dev/null
+gh pr merge --squash --delete-branch --subject "$PR_TITLE" --body "$PR_DESCRIPTION" "$PR_URL"
 echo -e "${GREEN}✓ PR merged with squash${NC}\n"
 
 # 8. Reset ai-work branch history
