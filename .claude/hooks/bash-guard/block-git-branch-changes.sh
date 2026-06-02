@@ -21,5 +21,5 @@ if echo "$cmd" | grep -iE '(git\s+pr\s+approve|gh\s+pr\s+review.*--approve)' > /
   exit 0
 fi
 
-# Default: allow the command
-echo '{"continue": true, "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
+# Default: let normal permission system handle it (don't auto-approve)
+echo '{"continue": true}'
