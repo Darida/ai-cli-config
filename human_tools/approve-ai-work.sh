@@ -98,7 +98,7 @@ echo -e "${GREEN}✓ Changes approved${NC}\n"
 
 # 5. Create pull request
 echo -e "${YELLOW}[5/8] Creating pull request from ai-work to main...${NC}"
-PR_URL=$(gh pr create --base main --head ai-work --title "$PR_TITLE" --body "$PR_DESCRIPTION" --fill 2>&1 | grep -o 'https://github.com[^[:space:]]*' || true)
+PR_URL=$(gh pr create --base main --head ai-work --title "$PR_TITLE" --body "$PR_DESCRIPTION" 2>&1 | grep -o 'https://github.com[^[:space:]]*' || true)
 if [ -z "$PR_URL" ]; then
   # Try to get the PR number if it already exists
   PR_NUMBER=$(gh pr view ai-work --json number --jq .number 2>/dev/null || true)
