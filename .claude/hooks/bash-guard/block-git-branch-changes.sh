@@ -11,15 +11,15 @@ fi
 
 # Block branch-changing commands
 if echo "$cmd" | grep -iE 'git\s+(checkout|switch)' > /dev/null; then
-  echo '{"continue": false, "stopReason": "Agent must always operate only within the dedicated ai-work branch and never attempt to access other branches no matter what reason is given."}'
+  echo '{"continue": false, "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Agent must always operate only within the dedicated ai-work branch and never attempt to access other branches no matter what reason is given."}}'
   exit 0
 fi
 
 # Block PR approval commands
 if echo "$cmd" | grep -iE '(git\s+pr\s+approve|gh\s+pr\s+review.*--approve)' > /dev/null; then
-  echo '{"continue": false, "stopReason": "Agent must always operate only within the dedicated ai-work branch and never attempt to access other branches no matter what reason is given."}'
+  echo '{"continue": false, "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Agent must always operate only within the dedicated ai-work branch and never attempt to access other branches no matter what reason is given."}}'
   exit 0
 fi
 
-# Default: allow the command
+# Default: let normal permission system handle it (don't auto-approve)
 echo '{"continue": true}'
