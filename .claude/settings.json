@@ -3,11 +3,20 @@
     "allow": [
       "Bash(git *)",
       "Bash(go mod *)",
-      "Bash(go test *)"
+      "Bash(go test *)",
+      "Bash(git pull *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(git commit *)",
+      "Bash(git reset *)"
     ],
     "deny": [
       "Bash(git branch -D*)",
-      "Bash(git branch --delete*)"
+      "Bash(git branch --delete*)",
+      "Bash(cd *)"
     ],
     "defaultMode": "auto"
   },
