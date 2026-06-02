@@ -9,14 +9,24 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}=== AI Work Approval Workflow ===${NC}\n"
 
-# 1. Verify no unsubmitted changes in local git
-echo -e "${YELLOW}[1/8] Verifying no uncommitted changes...${NC}"
+# 1. Verify no unsubmitted changes in local git and check branch state
+echo -e "${YELLOW}[1/8] Verifying no uncommitted changes and branch state...${NC}"
 if ! git diff-index --quiet HEAD --; then
   echo -e "${RED}Error: Uncommitted changes detected. Please commit or stash your changes first.${NC}"
   git status
   exit 1
 fi
-echo -e "${GREEN}✓ No uncommitted changes${NC}\n"
+echo -e "${GREEN}✓ No uncommitted changes${NC}"
+
+# Check if ai-work has diverged from main
+echo "  - Checking if ai-work has diverged from main..."
+MERGE_BASE=$(git merge-base ai-work main)
+if [ "$MERGE_BASE" != "$(git rev-parse main)" ] && [ "$MERGE_BASE" != "$(git rev-parse ai-work)" ]; then
+  echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
+  echo -e "${RED}Please manually reconcile the branches before proceeding.${NC}"
+  exit 1
+fi
+echo -e "${GREEN}✓ ai-work branch state is clean${NC}\n"
 
 # 2. Close any existing old PRs from ai-work
 echo -e "${YELLOW}[2/8] Checking for and closing any existing PRs...${NC}"
@@ -124,9 +134,10 @@ echo -e "${GREEN}✓ PR merged with squash${NC}\n"
 echo -e "${YELLOW}[8/8] Resetting ai-work branch history...${NC}"
 
 # Switch to main and get latest
-echo "  - Switching to main and pulling latest..."
+echo "  - Switching to main and syncing with remote..."
 git checkout main
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 
 # Force ai-work to match main (resetting history)
 echo "  - Resetting ai-work to match main..."
