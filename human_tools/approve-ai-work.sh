@@ -7,11 +7,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Ensure API key is available
-if [ -z "${GEMINI_API_KEY:-}" ]; then
-  echo -e "${RED}Error: GEMINI_API_KEY environment variable is missing.${NC}"
-  echo -e "Get a free key at https://aistudio.google.com/app/apikey"
-  echo -e "Run: export GEMINI_API_KEY='your_key' before running this script."
+# Pull the API key specific to this local git repository
+GEMINI_API_KEY=$(git config --get gemini_api_key || echo "")
+
+if [ -z "$GEMINI_API_KEY" ]; then
+  echo -e "${RED}Error: API key not found for this project.${NC}"
+  echo -e "To set it for this specific repository only, run:"
+  echo -e "git config --local gemini_api_key 'YOUR_KEY_HERE'"
   exit 1
 fi
 
