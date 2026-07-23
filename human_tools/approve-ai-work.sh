@@ -79,6 +79,8 @@ GEMINI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].te
 
 if [ -z "$GEMINI_OUTPUT" ]; then
   echo -e "${RED}Error: Failed to generate PR title and description with gemini${NC}"
+  echo -e "${YELLOW}Raw API Response (Debug Info):${NC}"
+  echo "$API_RESPONSE"
   exit 1
 fi
 
