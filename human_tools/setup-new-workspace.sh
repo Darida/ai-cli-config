@@ -109,6 +109,25 @@ git config core.hooksPath git/hooks
 # 7. Execute start-ai-work.sh to finalize ai-work branch setup
 bash "$(dirname "$0")/start-ai-work.sh"
 
+# 8. Validate files exist in remote repository
+echo ""
+echo "✅ Validating files in remote repository..."
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if git ls-remote --heads origin "$CURRENT_BRANCH" | grep -q "$CURRENT_BRANCH"; then
+    if git show origin/$CURRENT_BRANCH:AGENTS.md >/dev/null 2>&1 && \
+       git show origin/$CURRENT_BRANCH:CLAUDE.md >/dev/null 2>&1 && \
+       git show origin/$CURRENT_BRANCH:git/hooks/pre-push >/dev/null 2>&1; then
+        echo "✓ All files verified in remote repository"
+    else
+        echo "❌ ERROR: Some files missing from remote repository"
+        exit 1
+    fi
+else
+    echo "❌ ERROR: Branch '$CURRENT_BRANCH' not found in remote"
+    exit 1
+fi
+
 echo ""
 echo "✅ AI agent configuration initialized!"
 echo ""
