@@ -1,0 +1,71 @@
+#!/bin/bash
+# Pre-push hook: Run all Go tests before pushing to remote
+# This hook runs only on `git push`, not on `git commit`
+
+set -e
+
+# --- Branch Protection Check ---
+# Get the name of the current branch
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+if [ "$CURRENT_BRANCH" != "ai-work" ]; then
+    echo "❌ Unexpected branch name: $CURRENT_BRANCH"
+    echo "Expected: ai-work"
+    echo ""
+    echo "AI agents are only allowed to interact with the 'ai-work' branch."
+    echo ""
+    echo "To move your local commits to ai-work:"
+    echo "  1. git checkout ai-work"
+    echo "  2. git cherry-pick <commit-hash>  (for each commit)"
+    exit 1
+fi
+
+echo "🧪 Running tests before push..."
+
+# Check if this is a Go project
+if [ ! -f "go.mod" ]; then
+    echo "⏭️ No go.mod found. Skipping Go tests for this repository."
+else
+    # Run all tests in the project
+    if ! go test ./... -v -timeout 30s; then
+        echo ""
+        echo "❌ Tests failed! Push aborted."
+        echo "Fix the failing tests and try again."
+        exit 1
+    fi
+fi
+
+echo ""
+
+# --- Check for uncommitted changes AFTER tests ---
+echo "📋 Checking for uncommitted changes after tests..."
+UNCOMMITTED=$(git status --short)
+
+if [ -z "$UNCOMMITTED" ]; then
+    echo "✓ No uncommitted changes"
+else
+    echo "⚠️  Found uncommitted changes:"
+    echo "$UNCOMMITTED"
+    echo ""
+
+    # Check if ALL uncommitted changes are ONLY cassettes
+    CASSETTE_CHANGES=$(echo "$UNCOMMITTED" | grep -c "cassettes/" || true)
+    TOTAL_CHANGES=$(echo "$UNCOMMITTED" | wc -l)
+
+    if [ "$CASSETTE_CHANGES" -eq "$TOTAL_CHANGES" ] && [ "$TOTAL_CHANGES" -gt 0 ]; then
+        echo "✓ All changes are cassettes - committing automatically..."
+        git add -A
+        git commit -m "test: update cassette timestamps from pre-push test run
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+        echo "✓ Cassettes committed"
+    else
+        echo "❌ Found non-cassette uncommitted changes! Push aborted."
+        echo "Please review and commit/discard these changes manually."
+        exit 1
+    fi
+fi
+
+echo ""
+echo "✅ All tests passed! Proceeding with push..."
+exit 0
