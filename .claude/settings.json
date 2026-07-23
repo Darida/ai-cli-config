@@ -13,6 +13,9 @@
       "Bash(git commit *)",
       "Bash(git reset *)"
     ],
+    "ask": [
+      "Bash(gcloud *)"
+    ]
     "deny": [
       "Bash(git branch -D*)",
       "Bash(git branch --delete*)",
