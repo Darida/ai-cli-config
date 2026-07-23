@@ -7,6 +7,14 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Ensure API key is available
+if [ -z "${GEMINI_API_KEY:-}" ]; then
+  echo -e "${RED}Error: GEMINI_API_KEY environment variable is missing.${NC}"
+  echo -e "Get a free key at https://aistudio.google.com/app/apikey"
+  echo -e "Run: export GEMINI_API_KEY='your_key' before running this script."
+  exit 1
+fi
+
 echo -e "${YELLOW}=== AI Work Approval Workflow ===${NC}\n"
 
 # 1. Verify no unsubmitted changes in local git and check branch state
@@ -55,7 +63,17 @@ fi
 PROMPT_CONTENT=$(cat "$PROMPT_FILE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
-GEMINI_OUTPUT=$(echo "$PROMPT_CONTENT" | gemini)
+echo "  - Calling Gemini API..."
+# Safely escape the prompt into a JSON payload using jq
+JSON_PAYLOAD=$(jq -n --arg text "$PROMPT_CONTENT" '{contents: [{parts: [{text: $text}]}]}')
+
+# Call the REST API directly (using gemini-1.5-flash for speed/cost)
+API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "$JSON_PAYLOAD")
+
+# Extract the generated text from the JSON response
+GEMINI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
 
 if [ -z "$GEMINI_OUTPUT" ]; then
   echo -e "${RED}Error: Failed to generate PR title and description with gemini${NC}"
