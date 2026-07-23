@@ -57,16 +57,6 @@ Version: [TODO: e.g., 1.26.3, 3.11, 18.0.0]
 [your-test-command]
 ```
 
-### Environment Variables
-
-**TODO:** Document any required environment variables:
-
-```bash
-# Example:
-export PROJECT_ENV=development
-export API_KEY=<your-key>
-```
-
 ---
 
 ## File Operations
