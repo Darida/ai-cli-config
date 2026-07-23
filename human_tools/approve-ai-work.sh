@@ -8,12 +8,12 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Pull the API key specific to this local git repository
-GEMINI_API_KEY=$(git config --get gemini_api_key || echo "")
+GEMINI_API_KEY=$(git config --get gemini.apikey || echo "")
 
 if [ -z "$GEMINI_API_KEY" ]; then
   echo -e "${RED}Error: API key not found for this project.${NC}"
   echo -e "To set it for this specific repository only, run:"
-  echo -e "git config --local gemini_api_key 'YOUR_KEY_HERE'"
+  echo -e "git config --local gemini.apikey 'YOUR_KEY_HERE'"
   exit 1
 fi
 
