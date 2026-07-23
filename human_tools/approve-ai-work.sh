@@ -70,7 +70,7 @@ echo "  - Calling Gemini API..."
 JSON_PAYLOAD=$(jq -n --arg text "$PROMPT_CONTENT" '{contents: [{parts: [{text: $text}]}]}')
 
 # Call the REST API directly (using gemini-1.5-flash for speed/cost)
-API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}" \
   -H "Content-Type: application/json" \
   -d "$JSON_PAYLOAD")
 
