@@ -96,7 +96,7 @@ git commit -m "docs: add AI agent configuration
 - Add CLAUDE.md symlink to AGENTS.md
 - Add pre-push hook for automated testing
 
-Customize AGENTS.md with project-specific details."
+Customize AGENTS.md with project-specific details." || echo "  (no changes to commit)"
 
 # 6. Push to remote
 echo "🚀 Pushing to remote..."
