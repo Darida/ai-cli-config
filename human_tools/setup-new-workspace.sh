@@ -67,6 +67,9 @@ Customize AGENTS.md with project-specific details."
 echo "🚀 Pushing to remote..."
 git push origin $(git rev-parse --abbrev-ref HEAD)
 
+# 7. Execute start-ai-work.sh to finalize ai-work branch setup
+bash human_tools/start-ai-work.sh
+
 echo ""
 echo "✅ AI agent configuration initialized!"
 echo ""
