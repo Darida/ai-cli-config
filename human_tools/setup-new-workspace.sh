@@ -17,6 +17,41 @@ if [ ! -d .git ]; then
     exit 1
 fi
 
+# Check current branch and other branches
+CURRENT_BRANCH=$(git branch --show-current)
+OTHER_BRANCHES=$(git branch --list | grep -v "^\*" | grep -v "^  main$" | tr -d ' ')
+
+# Show what will happen
+echo "📋 Pre-flight check:"
+echo "  - Current branch: $CURRENT_BRANCH"
+if [ -n "$OTHER_BRANCHES" ]; then
+    echo "  - Branches to delete: $(echo "$OTHER_BRANCHES" | tr '\n' ' ')"
+fi
+echo "  - Will switch to main and proceed with setup"
+echo ""
+
+# Single confirmation before proceeding
+read -p "Proceed? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "❌ Operation cancelled"
+    exit 1
+fi
+
+# Switch to main if needed
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo "🔄 Switching to main..."
+    git checkout main >/dev/null 2>&1
+fi
+
+# Delete other branches if any exist
+if [ -n "$OTHER_BRANCHES" ]; then
+    echo "🗑️  Deleting other branches..."
+    echo "$OTHER_BRANCHES" | while read branch; do
+        git branch -D "$branch" 2>/dev/null || true
+    done
+fi
+
 # Verify template files exist
 if [ ! -f "$TEMPLATES_DIR/agents/AGENTS.md" ]; then
     echo "❌ Error: Template not found at $TEMPLATES_DIR/agents/AGENTS.md"
