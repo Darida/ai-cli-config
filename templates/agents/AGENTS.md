@@ -317,27 +317,6 @@ git push origin ai-work
 
 ---
 
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Check status | `git status` |
-| Review changes | `git diff` |
-| Run tests | `[your-test-command]` |
-| Commit work | `git add -A && git commit -m "msg"` |
-| Push to ai-work | `git push origin ai-work` |
-| TODO: [other common task] | `[command]` |
-
----
-
-## Last Updated
-
-- **Template Version:** 2026-07-23
-- **Last Reviewed:** [TODO: Date]
-- **Status:** Active (customize for your project)
-
----
-
 ## Customization Checklist
 
 Before using this template in your project:
