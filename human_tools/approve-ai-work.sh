@@ -30,9 +30,9 @@ echo -e "${GREEN}✓ No uncommitted changes${NC}"
 
 # Check if ai-work has diverged from main
 echo "  - Checking if ai-work has diverged from main..."
-MERGE_BASE=$(git merge-base ai-work main)
-if [ "$MERGE_BASE" != "$(git rev-parse main)" ] && [ "$MERGE_BASE" != "$(git rev-parse ai-work)" ]; then
-  echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
+MERGE_BASE=$(git merge-base ai-work origin/main)
+if [ "$MERGE_BASE" != "$(git rev-parse origin/main)" ] && [ "$MERGE_BASE" != "$(git rev-parse ai-work)" ]; then
+echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
   echo -e "${RED}Please manually reconcile the branches before proceeding.${NC}"
   exit 1
 fi
@@ -52,7 +52,7 @@ echo ""
 
 # 3. Generate PR title and description using gemini CLI
 echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
-DIFF_CONTENT=$(git diff main...HEAD -- . ':!go.sum')
+DIFF_CONTENT=$(git diff origin/main...HEAD -- . ':!go.sum')
 
 # Load prompt template and substitute diff content
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
