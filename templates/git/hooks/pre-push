@@ -20,14 +20,19 @@ if [ "$CURRENT_BRANCH" != "ai-work" ]; then
     exit 1
 fi
 
-echo "🧪 Running Go tests before push..."
+echo "🧪 Running tests before push..."
 
-# Run all tests in the project
-if ! go test ./... -v -timeout 30s; then
-    echo ""
-    echo "❌ Tests failed! Push aborted."
-    echo "Fix the failing tests and try again."
-    exit 1
+# Check if this is a Go project
+if [ ! -f "go.mod" ]; then
+    echo "⏭️ No go.mod found. Skipping Go tests for this repository."
+else
+    # Run all tests in the project
+    if ! go test ./... -v -timeout 30s; then
+        echo ""
+        echo "❌ Tests failed! Push aborted."
+        echo "Fix the failing tests and try again."
+        exit 1
+    fi
 fi
 
 echo ""
