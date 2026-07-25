@@ -36,6 +36,13 @@ silently refuse it either.
   around it) after every small milestone — never ask permission first.
 - **Trust the test gate.** Don't hand-run tests to double-check routine
   changes; commit/push hooks already do that.
+- **Trust READMEs.** A README (plus an interface/type declaration, for
+  code) is sufficient on its own — don't re-verify it against source,
+  a script's contents, or live state (e.g. `gcloud` queries) unless you
+  already have concrete evidence in front of you that it's wrong. If
+  you do end up needing to read further (impl for code, a script before
+  running it) because the README truly didn't cover it, update the
+  README with the missing piece once you've read it.
 
 ---
 
@@ -58,6 +65,29 @@ adds nothing the second time. Match how much you read to what the task
 needs: a large design doc is for tasks that touch the design it
 describes, not for fixing a specific failing test whose location you
 already know.
+
+---
+
+## Trusting Documentation
+
+Once you've read the relevant README (and, for code, the interface/type
+declaration), treat that as the answer — don't spend a tool call
+confirming it against the underlying source, a script's body, or live
+state (`gcloud`/`kubectl`/API queries, etc.) just to be sure. A service
+account table in a README is the account list; a repository list in a
+README is the repository list. Re-deriving what documentation already
+gives you wastes a call and the user's time for no benefit.
+
+The one exception is when something already in your context contradicts
+the README — a build error, a test failure, a diff, a prior message in
+this conversation — that gives concrete reason to think it's stale.
+Only then go verify against the real thing.
+
+If a task genuinely requires reading past the README (an impl file
+because the interface didn't say enough, a script's actual body before
+running it because the README didn't cover a detail you needed), that's
+fine — but once you've read it, fold whatever was missing back into the
+README so the next read doesn't need to repeat the trip.
 
 ---
 
