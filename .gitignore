@@ -28,3 +28,7 @@
 # 6. Track template files (shared agent config, git hooks/scripts)
 !templates/
 !templates/**
+
+# 7. Track skill files
+!skills/
+!skills/**
