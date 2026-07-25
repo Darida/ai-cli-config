@@ -38,5 +38,5 @@ fi
 
 echo "⚠️  $GEN_DIR changed — committing automatically..."
 git -C "$REPO" add "$GEN_DIR"
-git -C "$REPO" commit -m "chore: regenerate $GEN_DIR"
+git -C "$REPO" commit --no-verify -m "chore: regenerate $GEN_DIR" -- "$GEN_DIR"
 echo "✓ $GEN_DIR committed"
