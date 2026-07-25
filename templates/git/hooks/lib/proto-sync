@@ -43,5 +43,5 @@ if [ -z "$CHANGES" ]; then
 fi
 
 git -C "$DEST" add .
-git -C "$DEST" commit -m "chore: sync proto from $SOURCE_DIR"
+git -C "$DEST" commit --no-verify -m "chore: sync proto from $SOURCE_DIR"
 echo "📄 synced *.proto from $SOURCE_DIR into $DEST and committed"

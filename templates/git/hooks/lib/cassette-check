@@ -27,7 +27,7 @@ if [ -n "$CASSETTE_FILES" ]; then
     echo "$CASSETTE_FILES" | while IFS= read -r f; do
         [ -n "$f" ] && git -C "$REPO" add -- "$f"
     done
-    git -C "$REPO" commit -m "test: update cassettes from pre-push test run"
+    git -C "$REPO" commit --no-verify -m "test: update cassettes from pre-push test run"
     echo "✓ Cassettes committed"
 else
     echo "✓ No cassette changes"

@@ -53,6 +53,20 @@ up.
   that subshell — where cwd was whatever the caller's cwd was. Always
   re-join the base dir with the relative path before using it outside the
   subshell that produced it.
+- **An auto-commit without `--no-verify` recurses into itself.**
+  `go-generate` and `proto-sync` are called from `pre-commit`; their own
+  internal `git commit` is a real `git commit` invocation, so it
+  re-triggers `pre-commit` — which calls the same script again. If
+  codegen/sync genuinely still differs from `HEAD` (the normal case this
+  auto-commit exists for, not an edge case), the outer commit is still
+  blocked on its own nested `pre-commit` finishing, so `HEAD` never
+  moves, so every recursive level sees the same unresolved diff against
+  the same stale `HEAD` — forever, until something kills the process.
+  This isn't hypothetical: it happened on the very first real use of
+  `go-generate`'s auto-commit path in this workspace, 600+ levels deep
+  before being caught. All three auto-committing scripts now use `git
+  commit --no-verify` for exactly this reason — any new auto-commit added
+  here needs it too if it could ever run from inside `pre-commit`.
 
 Verify any new cross-repo `git -C` call or subshell-scoped `cd` the same
 way: by actually running the hook, not just reading it.
