@@ -34,29 +34,30 @@ has_pending_changes() {
 
 mapfile -t SUBMODULE_PATHS < <(git config --file "$WORKSPACE_ROOT/.gitmodules" --get-regexp '\.path$' | awk '{print $2}')
 
-TO_APPROVE_NAMES=()
-TO_APPROVE_PATHS=()
+SUBMODULES_TO_APPROVE=()
 echo "=== ai-work -> main review links ==="
 for path in "${SUBMODULE_PATHS[@]}"; do
-    full_path="$WORKSPACE_ROOT/$path"
-    if has_pending_changes "$full_path"; then
-        echo "  $path: $(compare_url "$full_path")"
-        TO_APPROVE_NAMES+=("$path")
-        TO_APPROVE_PATHS+=("$full_path")
+    if has_pending_changes "$WORKSPACE_ROOT/$path"; then
+        echo "  $path: $(compare_url "$WORKSPACE_ROOT/$path")"
+        SUBMODULES_TO_APPROVE+=("$path")
     else
         echo "  $path: no changes, skipping"
     fi
 done
+
+# Only used for the early-exit check below — approving any submodule
+# below always updates the workspace root's submodule pointers, so its
+# own final approval step doesn't need this re-checked or carried forward.
+WORKSPACE_HAD_CHANGES=0
 if has_pending_changes "$WORKSPACE_ROOT"; then
     echo "  workspace root: $(compare_url "$WORKSPACE_ROOT")"
-    TO_APPROVE_NAMES+=("workspace root")
-    TO_APPROVE_PATHS+=("$WORKSPACE_ROOT")
+    WORKSPACE_HAD_CHANGES=1
 else
     echo "  workspace root: no changes, skipping"
 fi
 echo ""
 
-if [ "${#TO_APPROVE_PATHS[@]}" -eq 0 ]; then
+if [ "${#SUBMODULES_TO_APPROVE[@]}" -eq 0 ] && [ "$WORKSPACE_HAD_CHANGES" -eq 0 ]; then
     echo "✅ Nothing to approve anywhere."
     exit 0
 fi
@@ -79,11 +80,28 @@ if [ -z "$WORKSPACE_KEY" ]; then
     exit 1
 fi
 
-for i in "${!TO_APPROVE_PATHS[@]}"; do
+for name in "${SUBMODULES_TO_APPROVE[@]}"; do
     echo ""
-    echo "=== Approving ${TO_APPROVE_NAMES[$i]} ==="
-    (cd "${TO_APPROVE_PATHS[$i]}" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+    echo "=== Approving $name ==="
+    (cd "$WORKSPACE_ROOT/$name" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+
+    # Approving a submodule always squash-merges it and resets its
+    # ai-work branch to a brand-new commit — a fresh SHA that can never
+    # match what the workspace root had recorded, so the pointer bump
+    # below is guaranteed, not conditional. (approve-ai-work.sh's own
+    # `set -e`, and ours, means we'd never even reach this line on
+    # cancellation or failure — only on to a real, completed approval.)
+    git -C "$WORKSPACE_ROOT" add "$name"
+    git -C "$WORKSPACE_ROOT" commit -m "chore: sync $name submodule pointer after approval"
+    git -C "$WORKSPACE_ROOT" push origin ai-work
 done
+
+# Unconditional: the early-exit above already proved the workspace root
+# needs this — either it had its own changes and the loop above was empty
+# (never touched it), or the loop ran and gave it a pointer-bump commit.
+echo ""
+echo "=== Approving workspace root ==="
+(cd "$WORKSPACE_ROOT" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
 
 echo ""
 echo "✅ approve-all-ai-work done"
