@@ -35,8 +35,13 @@ echo -e "${GREEN}✓ No uncommitted changes${NC}"
 echo "  - Checking if ai-work has diverged from main..."
 MERGE_BASE=$(git merge-base ai-work origin/main)
 if [ "$MERGE_BASE" != "$(git rev-parse origin/main)" ] && [ "$MERGE_BASE" != "$(git rev-parse ai-work)" ]; then
-echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
-  echo -e "${RED}Please manually reconcile the branches before proceeding.${NC}"
+  echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
+  echo -e "${YELLOW}main likely has commits ai-work doesn't (e.g. pushed straight to main,${NC}"
+  echo -e "${YELLOW}bypassing this workflow). To reconcile, run:${NC}"
+  echo -e "  ${GREEN}git merge origin/main --no-edit || git merge --abort${NC}"
+  echo -e "${YELLOW}That merges cleanly if there's no real conflict, or aborts back to the${NC}"
+  echo -e "${YELLOW}exact state you're in now if there is — safe either way. If it merges,${NC}"
+  echo -e "${YELLOW}push it (git push origin ai-work) and re-run this script.${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ ai-work branch state is clean${NC}\n"
