@@ -35,6 +35,18 @@ if [ ! -f "$REPO/go.mod" ]; then
     exit 0
 fi
 
+# go generate only ever writes files a current source asks for — it never
+# deletes an output whose source was since renamed, moved, or removed, so
+# a stale generated file can silently linger and, for proto in
+# particular, collide at runtime with whatever now generates from the
+# same message/service names. $GEN_DIR is entirely generated output (by
+# convention: nothing hand-written lives under it), so wiping it clean
+# before every regeneration is safe and is what actually keeps it
+# accurate — the diff check below still only stages/commits it if the
+# rebuilt contents differ from what's tracked.
+rm -rf "${REPO:?}/$GEN_DIR"
+mkdir -p "$REPO/$GEN_DIR"
+
 echo "🧪 go generate ./..."
 if ! go -C "$REPO" generate ./...; then
     echo "❌ go generate failed!" >&2
