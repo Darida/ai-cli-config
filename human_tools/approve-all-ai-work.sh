@@ -85,18 +85,16 @@ for name in "${SUBMODULES_TO_APPROVE[@]}"; do
     echo "=== Approving $name ==="
     (cd "$WORKSPACE_ROOT/$name" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
 
-    # Approving a submodule squash-merges it and resets its ai-work branch
-    # to match the new main — moving its checked-out commit. That leaves
-    # the workspace root's recorded pointer for it stale, and even if the
-    # workspace root had nothing pending before, it does now. Sync it
-    # immediately rather than letting it surprise the workspace root's own
-    # turn below.
-    if [ -n "$(git -C "$WORKSPACE_ROOT" status --porcelain -- "$name")" ]; then
-        git -C "$WORKSPACE_ROOT" add "$name"
-        git -C "$WORKSPACE_ROOT" commit -m "chore: sync $name submodule pointer after approval"
-        git -C "$WORKSPACE_ROOT" push origin ai-work
-        WORKSPACE_HAS_CHANGES=1
-    fi
+    # Approving a submodule always squash-merges it and resets its
+    # ai-work branch to a brand-new commit — a fresh SHA that can never
+    # match what the workspace root had recorded, so the pointer bump
+    # below is guaranteed, not conditional. (approve-ai-work.sh's own
+    # `set -e`, and ours, means we'd never even reach this line on
+    # cancellation or failure — only on to a real, completed approval.)
+    git -C "$WORKSPACE_ROOT" add "$name"
+    git -C "$WORKSPACE_ROOT" commit -m "chore: sync $name submodule pointer after approval"
+    git -C "$WORKSPACE_ROOT" push origin ai-work
+    WORKSPACE_HAS_CHANGES=1
 done
 
 if [ "$WORKSPACE_HAS_CHANGES" -eq 1 ]; then
