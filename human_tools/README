@@ -18,3 +18,38 @@ After your AI agent finishes a task on the `ai-work` branch, preview diff in Git
 ```bash
 ./approve-ai-work.sh
 ```
+
+## Multi-repo workspaces: approve-all-ai-work.sh
+
+For a workspace with submodules, `approve-all-ai-work.sh` runs the above
+across all of them in one go instead of `cd`-ing into each one by hand.
+
+1. Discovers submodules from the workspace's `.gitmodules` — never
+   hardcoded, so it doesn't need updating when a submodule is added or
+   removed.
+2. For each submodule, then the workspace root itself, checks whether
+   `ai-work` actually has anything `main` doesn't. Repos with nothing
+   pending are skipped entirely — no link shown, `approve-ai-work.sh`
+   never runs for them.
+3. Prints the GitHub compare link (`.../compare/ai-work?expand=1`) for
+   every repo that does have pending changes, and pauses for one
+   confirmation before doing anything else.
+4. Only after that confirmation does it run `approve-ai-work.sh` for each
+   one — submodules first, workspace root last, since the root's own
+   `ai-work` diff typically includes submodule pointer bumps that only
+   make sense once each submodule has actually been merged. One
+   `gemini.apikey`, read from the workspace root's own local git config
+   (`git config --local gemini.apikey '...'`, set once there) — no
+   per-repo config, no fallback chain. This script reads it once and
+   passes it in explicitly to every repo, rather than letting
+   `approve-ai-work.sh` re-derive it itself from whatever directory
+   happens to be current. Stops with a clear message if the workspace
+   root has no key set.
+
+```bash
+./approve-all-ai-work.sh
+```
+
+Run from anywhere — it locates the workspace root relative to its own
+location (assumes this `ai-cli-config` checkout sits directly at the
+workspace root, as a submodule).

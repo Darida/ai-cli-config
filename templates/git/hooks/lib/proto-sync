@@ -1,0 +1,47 @@
+#!/bin/bash
+# Copies then commits in one step (if anything actually changed), so
+# whatever's copied can never sit there uncommitted waiting for something
+# else to notice it — same auto-commit reasoning as cassette-check and
+# go-generate. Called once per destination — a caller syncing to N places
+# calls this N times.
+set -e
+
+# git sets GIT_DIR (etc.) when invoking a hook, pointing at the invoking
+# repo's own git dir. That's scoped to this process only — env var changes
+# never propagate back to the parent once this script exits, so there's
+# nothing to restore before returning. It still has to be unset here
+# first, though: left set, it would override `-C` on the git commands
+# below and silently target the wrong repo whenever the destination
+# belongs to a different repo than the caller (e.g. one repo syncing into
+# a sibling's working tree).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+for arg in "$@"; do
+    case "$arg" in
+        --dest=*) DEST="${arg#--dest=}" ;;
+        --source=*) SOURCE_DIR="${arg#--source=}" ;;
+        *) echo "❌ proto-sync: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${DEST:-}" ] || [ -z "${SOURCE_DIR:-}" ]; then
+    echo "❌ proto-sync: usage: proto-sync --dest=<dir> --source=<dir>" >&2
+    exit 1
+fi
+
+if [ ! -d "$SOURCE_DIR" ]; then
+    echo "❌ proto-sync: $SOURCE_DIR not found" >&2
+    exit 1
+fi
+
+mkdir -p "$DEST"
+(cd "$SOURCE_DIR" && find . -name '*.proto' -exec cp --parents {} "$DEST/" \;)
+
+CHANGES=$(git -C "$DEST" status --porcelain .)
+if [ -z "$CHANGES" ]; then
+    echo "✓ $DEST is up to date"
+    exit 0
+fi
+
+git -C "$DEST" add .
+git -C "$DEST" commit -m "chore: sync proto from $SOURCE_DIR"
+echo "📄 synced *.proto from $SOURCE_DIR into $DEST and committed"

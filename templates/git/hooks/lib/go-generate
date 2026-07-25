@@ -1,0 +1,42 @@
+#!/bin/bash
+# Regenerates and, if that changed anything, commits it as its own commit
+# — same reasoning as cassette-check auto-committing expected noise:
+# generated output needing a refresh shouldn't fail the commit/push over
+# it. One script for both the pre-commit and pre-push call sites, since
+# "regenerate, commit if changed" is the same operation either way. Skips
+# gracefully if the repo isn't a Go module.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        --generated-dir=*) GEN_DIR="${arg#--generated-dir=}" ;;
+        *) echo "❌ go-generate: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ] || [ -z "${GEN_DIR:-}" ]; then
+    echo "❌ go-generate: usage: go-generate --repo=<path> --generated-dir=<relative>" >&2
+    exit 1
+fi
+
+if [ ! -f "$REPO/go.mod" ]; then
+    echo "⏭️ No go.mod found. Skipping go generate for this repository."
+    exit 0
+fi
+
+echo "🧪 go generate ./..."
+if ! go -C "$REPO" generate ./...; then
+    echo "❌ go generate failed!" >&2
+    exit 1
+fi
+
+CHANGES=$(git -C "$REPO" status --porcelain -- "$GEN_DIR")
+if [ -z "$CHANGES" ]; then
+    echo "✓ $GEN_DIR is up to date"
+    exit 0
+fi
+
+echo "⚠️  $GEN_DIR changed — committing automatically..."
+git -C "$REPO" add "$GEN_DIR"
+git -C "$REPO" commit -m "chore: regenerate $GEN_DIR"
+echo "✓ $GEN_DIR committed"

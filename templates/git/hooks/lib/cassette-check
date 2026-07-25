@@ -1,0 +1,40 @@
+#!/bin/bash
+# Test runs can leave behind refreshed cassette fixtures as a side effect.
+# Committing just those files (never `add -A`) clears that expected noise
+# without touching anything else uncommitted, and never blocks the push
+# over it either way — whether anything is still left uncommitted
+# afterward is require-clean's job, not this script's.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ cassette-check: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ cassette-check: usage: cassette-check --repo=<path>" >&2
+    exit 1
+fi
+
+CHANGED_FILES=$(
+    { git -C "$REPO" diff --name-only HEAD --; git -C "$REPO" ls-files --others --exclude-standard; } 2>/dev/null | sort -u
+)
+CASSETTE_FILES=$(echo "$CHANGED_FILES" | grep "cassettes/" || true)
+
+if [ -n "$CASSETTE_FILES" ]; then
+    echo "📼 Committing cassette changes..."
+    echo "$CASSETTE_FILES" | while IFS= read -r f; do
+        [ -n "$f" ] && git -C "$REPO" add -- "$f"
+    done
+    git -C "$REPO" commit -m "test: update cassettes from pre-push test run"
+    echo "✓ Cassettes committed"
+else
+    echo "✓ No cassette changes"
+fi
+
+REMAINING=$(git -C "$REPO" status --porcelain)
+if [ -n "$REMAINING" ]; then
+    echo "ℹ️  Other uncommitted changes remain (not this script's job):"
+    echo "$REMAINING"
+fi

@@ -7,8 +7,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Pull the API key specific to this local git repository
-GEMINI_API_KEY=$(git config --get gemini.apikey || echo "")
+# Accept the key as an input if the caller already has it (e.g.
+# approve-all-ai-work.sh reads it from each target repo's own local git
+# config before invoking this script) — otherwise fall back to reading it
+# from the current repo's git config, for standalone use.
+GEMINI_API_KEY="${GEMINI_API_KEY:-$(git config --get gemini.apikey || echo "")}"
 
 if [ -z "$GEMINI_API_KEY" ]; then
   echo -e "${RED}Error: API key not found for this project.${NC}"
@@ -32,8 +35,17 @@ echo -e "${GREEN}✓ No uncommitted changes${NC}"
 echo "  - Checking if ai-work has diverged from main..."
 MERGE_BASE=$(git merge-base ai-work origin/main)
 if [ "$MERGE_BASE" != "$(git rev-parse origin/main)" ] && [ "$MERGE_BASE" != "$(git rev-parse ai-work)" ]; then
-echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
-  echo -e "${RED}Please manually reconcile the branches before proceeding.${NC}"
+  REPO_PATH="$(git rev-parse --show-toplevel)"
+  echo -e "${RED}Error: ai-work and main have diverged. Commits exist that are not shared.${NC}"
+  echo -e "${YELLOW}main likely has commits ai-work doesn't (e.g. pushed straight to main,${NC}"
+  echo -e "${YELLOW}bypassing this workflow). To reconcile, run (full path included since${NC}"
+  echo -e "${YELLOW}you may not be sitting in this repo's directory):${NC}"
+  echo -e "  ${GREEN}git -C \"$REPO_PATH\" merge origin/main --no-edit || git -C \"$REPO_PATH\" merge --abort${NC}"
+  echo -e "${YELLOW}That merges cleanly if there's no real conflict (--no-edit skips the${NC}"
+  echo -e "${YELLOW}commit-message editor, so it won't open an interactive window), or${NC}"
+  echo -e "${YELLOW}aborts back to the exact state you're in now if there is — safe either${NC}"
+  echo -e "${YELLOW}way. If it merges, push it and re-run this script:${NC}"
+  echo -e "  ${GREEN}git -C \"$REPO_PATH\" push origin ai-work${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ ai-work branch state is clean${NC}\n"
