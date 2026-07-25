@@ -2,9 +2,9 @@
 
 A Java-style hexagonal layering for a Go backend, split into three
 layers — `repository/`, `core/`, `services/` — each with a narrow job.
-Established for `Critter-Genetics-Breeder-Backend`; apply the same
-shape to any new Go service in this workspace unless a project's own
-README says otherwise.
+Apply this shape to a new Go service unless the project's own README
+already documents a different, deliberate convention — don't impose
+this over an existing, working pattern.
 
 ---
 
@@ -12,7 +12,8 @@ README says otherwise.
 
 - **Three layers, one direction of knowledge.** `repository/` → dumb
   CRUD. `core/` → all business logic, internal protos only. `services/`
-  → thin orchestration, the only layer that touches `v1`/wire types.
+  → thin orchestration, the only layer that touches the public wire
+  API's types.
 - **`interface.go` / `impl/` / `module/` split**, for every `core/` and
   `repository/` package. `impl` imports its parent interface (for error
   sentinels); `module` imports both and is the only thing that could
@@ -24,8 +25,8 @@ README says otherwise.
 - **Resource names are opaque keys.** Never parsed. Containment is
   parent-holds-child-reference; reverse lookups go through a
   repository-maintained index, never string surgery.
-- **Validators run automatically** via a `connect.Interceptor` +
-  type registry — no action ever calls a validator itself.
+- **Validators run automatically** via an interceptor + type registry —
+  no action ever calls a validator itself.
 - **Converters are hand-written, fuzz-tested, and never fetch.** Callers
   gather everything first, then hand it to the converter.
 - **Tests target interfaces, not impl**, using real in-memory
@@ -60,12 +61,12 @@ services/
     <name>.go        # Server: thin orchestration, inline error-code mapping
     <name>_test.go
   converters/
-    <entity>.go      # hand-written internal <-> v1, plus batch/list helpers
+    <entity>.go      # hand-written internal <-> wire, plus batch/list helpers
     <entity>_fuzz_test.go
   validation/
-    registry.go      # generic Registry + connect.Interceptor (no domain knowledge)
+    registry.go      # generic Registry + interceptor (no domain knowledge)
   validations/
-    XxxRequestValidator.go   # one per v1 request message, flat — not split by service
+    XxxRequestValidator.go   # one per wire request message, flat — not split by service
     XxxEntityValidator.go    # only if a request ever embeds a full entity message
 ```
 
@@ -85,16 +86,16 @@ services/
   independent repository writes in the same `core/` action are
   acceptable for now, since they'll share a transaction later).
 - Defines and returns its own `ErrNotFound` / `ErrAlreadyExists` (etc.)
-  in `interface.go` — no shared `repoerr` package. `impl/` imports the
+  in `interface.go` — no shared error package. `impl/` imports the
   parent package directly to reference and return these.
 - Defensive copies on read/write (e.g. `proto.Clone`) so callers can't
   mutate a stored entity by mutating what they got back.
 
 ## core/ — All Business Logic
 
-- Operates exclusively on **internal-only proto entities**
-  (`gen/.../internalpb/entities`) — never `v1`. `v1` is not imported
-  anywhere under `core/`.
+- Operates exclusively on **internal-only proto entities** (a separate
+  internal proto namespace from whatever the public wire API uses).
+  The wire API's types are not imported anywhere under `core/`.
 - Every cost formula, precondition check, threshold, and lazy-resolution
   rule lives here. A repository never decides anything; it only
   persists what `core/` computed.
@@ -106,26 +107,27 @@ services/
   it fetches everything itself and returns it — a service's job is
   never to fetch-then-convert; `core/` hands back everything a
   converter needs in one call.
-- A "special" or "QA-only" capability (e.g. a devtools force-complete
-  action) is not a special `core/` package of its own — it's a normal
-  capability on the domain it actually belongs to (e.g.
-  `core/nest.Manager.ChangeBreedingTime`, reused by both a real "speed
-  up" purchase and a QA action). Only the `services/` layer around it
-  is special (not reachable by a release client).
+- A "special" or "QA-only" capability (e.g. an admin-only action that
+  forces a normally time-gated state transition) is not a special
+  `core/` package of its own — it's a normal capability on the domain
+  it actually belongs to (e.g. a `Manager.ForceComplete` method also
+  used by the real, player/user-triggered completion flow). Only the
+  `services/` layer wrapping it is special — gated so a normal client
+  can't reach it.
 
 ## services/ — Thin Orchestration Only
 
 - An action file is ~5 lines: validate (automatic, via the
   interceptor — never called explicitly), delegate to exactly one
-  `core/` manager call, convert the result to `v1`, map errors. No
-  mutation of any entity happens in `services/`.
+  `core/` manager call, convert the result to the wire type, map
+  errors. No mutation of any entity happens in `services/`.
 - **Inline, duplicated error-code mapping per action** — no shared
-  `errormap` package. Only map the specific sentinel errors this
-  particular action actually expects to a non-Internal `connect.Code`;
-  everything else falls through to `CodeInternal`. When genuinely
-  unsure whether an error deserves a distinct code, leave it Internal —
-  don't guess a mapping that might mask a real bug as a misleading
-  client-facing code.
+  error-mapping package. Only map the specific sentinel errors this
+  particular action actually expects to a non-default response code;
+  everything else falls through to the generic internal-error code.
+  When genuinely unsure whether an error deserves a distinct code,
+  leave it as the generic internal one — don't guess a mapping that
+  might mask a real bug as a misleading client-facing code.
 - Converters, validators, and the validation registry are **plain
   packages** — no `interface.go`/`impl/`/`module/` split. That split is
   reserved for `core/` and `repository/`.
@@ -136,21 +138,21 @@ services/
 
 **No interface propagates a dependency's error identity — whether that
 dependency is a repository or another `core` package.** A caller of
-`core/nest.Manager` should never need to import `repository/player`,
-`repository/creature`, or `core/player` to understand what error it
-might get back. It only ever needs `core/nest`'s own sentinels.
+`core/order.Manager` should never need to import `repository/customer`
+or `core/customer` to understand what error it might get back. It only
+ever needs `core/order`'s own sentinels.
 
 Two cases, decided at the call site where a dependency's error comes
 back:
 
 1. **Caller-facing, on a resource named directly by the caller's own
-   argument** (a nest/creature/player name passed straight into the
-   method): wrap it into this package's own declared sentinel so
-   identity survives, but ownership doesn't:
+   argument** (an ID passed straight into the method): wrap it into
+   this package's own declared sentinel so identity survives, but
+   ownership doesn't:
    ```go
-   n, err := m.nests.Get(ctx, nestName)
+   o, err := m.orders.Get(ctx, orderID)
    if err != nil {
-       return nil, fmt.Errorf("%w: %v", nest.ErrNotFound, err)
+       return nil, fmt.Errorf("%w: %v", order.ErrNotFound, err)
    }
    ```
 2. **Internal invariant violation** — a lookup on something the caller
@@ -158,24 +160,25 @@ back:
    own internal list, a second lookup on something already confirmed to
    exist a moment earlier). Wrap with `%v` only, no `%w`, no exported
    sentinel — the chain is deliberately broken so nothing upstream can
-   match it to anything but `CodeInternal`:
+   match it to anything but the generic internal-error code:
    ```go
-   owner, err := m.players.FindOwner(ctx, creatureName) // creature already confirmed to exist
+   owner, err := m.customers.FindOwner(ctx, orderID) // order already confirmed to exist
    if err != nil {
-       return fmt.Errorf("nest: owner of creature %q: %v", creatureName, err)
+       return fmt.Errorf("order: owner of order %q: %v", orderID, err)
    }
    ```
 
 **When genuinely unsure which case applies, treat it as case 2 —
 internal is always a safe default.** A masked failure exposed as the
-wrong error code is worse than an honest `CodeInternal`.
+wrong error code is worse than an honest internal-error response.
 
 This means every `core/`/`repository/` package's `interface.go` ends up
 with its own `ErrNotFound`, its own `ErrAlreadyExists`, its own
-`ErrInsufficientFunds`, etc. — even when a sibling package already has
-one with the same name and meaning. That duplication is intentional,
-matching the same "each layer declares only what it directly returns"
-principle as the error-code mapping rule above.
+domain-specific business-rule errors, etc. — even when a sibling
+package already has one with the same name and meaning. That
+duplication is intentional, matching the same "each layer declares only
+what it directly returns" principle as the error-code mapping rule
+above.
 
 ---
 
@@ -198,24 +201,24 @@ Every `core/` and `repository/` package:
   (for the constructor) — putting it in either of those would create
   the cycle `impl` importing its parent was designed to avoid.
   ```go
-  // core/player/module/module.go
+  // core/order/module/module.go
   package module
 
   import (
       "sync"
-      "github.com/.../core/player"
-      "github.com/.../core/player/impl"
-      repoplayermodule "github.com/.../repository/player/module"
+      "example.com/service/core/order"
+      "example.com/service/core/order/impl"
+      repoordermodule "example.com/service/repository/order/module"
   )
 
   var (
       once     sync.Once
-      instance player.Manager
+      instance order.Manager
   )
 
-  func NewManager() player.Manager {
+  func NewManager() order.Manager {
       once.Do(func() {
-          instance = impl.NewManager(repoplayermodule.NewPlayerRepository())
+          instance = impl.NewManager(repoordermodule.NewOrderRepository())
       })
       return instance
   }
@@ -235,46 +238,45 @@ Every `core/` and `repository/` package:
 
 ## Proto Namespace Split
 
-- An **internal-only proto namespace** (e.g. `proto/critter/internalpb/`,
-  generated to `gen/.../internalpb/entities`) holds every entity
-  `repository/` and `core/` operate on. It is never a release client's
-  concern and must never be synced into a client repo (web/mobile) —
-  scope any proto-sync tooling to the public `v1` tree only.
-- The **public wire proto** (`v1`) is imported only from `services/`.
+- An **internal-only proto namespace**, generated to its own package,
+  holds every entity `repository/` and `core/` operate on. It is never
+  a client's concern and must never be synced into a client repo —
+  scope any proto-sync tooling to the public wire-API tree only.
+- The **public wire proto** is imported only from `services/`.
 - `services/converters/` is the one seam where both namespaces are in
   scope. Converters:
   - Are hand-written (redaction/special-case logic can't be generated).
-  - Provide **batch/list APIs** (`XxxToV1([]internal) []*v1X`) so no
+  - Provide **batch/list APIs** (`XxxToWire([]internal) []*wireX`) so no
     caller ever for-loops a conversion itself.
   - **Never fetch.** A converter takes exactly the data it needs as
-    parameters; assembling that data (e.g. fetching a nest's occupant
-    creatures) is `core/`'s job, done inside the manager method that
-    returns the nest, not a service-layer helper and not the converter.
-  - Are round-trip fuzz-tested: generate a random proto (e.g. via
-    `protorand`), convert `a -> b -> a` and `b -> a -> b`, compare with
-    a structural, proto-aware diff (e.g. `protocmp` + `go-cmp`). Any
-    field requiring special handling (like redacting an unrevealed
-    locus's alleles) is cleaned up explicitly in the test — deliberately
-    not silently skipped — so a newly added field with no explicit
-    handling makes the fuzz test fail loudly instead of passing by
-    accident.
+    parameters; assembling that data (e.g. fetching an order's line
+    items) is `core/`'s job, done inside the manager method that
+    returns the order, not a service-layer helper and not the
+    converter.
+  - Are round-trip fuzz-tested: generate a random proto (e.g. via a
+    proto-fuzzing library), convert `a -> b -> a` and `b -> a -> b`,
+    compare with a structural, proto-aware diff (e.g. a proto-aware
+    `cmp` transform). Any field requiring special handling (like
+    redacting a value the requester isn't authorized to see) is cleaned
+    up explicitly in the test — deliberately not silently skipped — so
+    a newly added field with no explicit handling makes the fuzz test
+    fail loudly instead of passing by accident.
 
 ---
 
 ## Validation
 
-- One `Validator` per `v1` request message type, in a **flat**
+- One `Validator` per wire request message type, in a **flat**
   `services/validations/` package: `XxxRequestValidator.go` — not split
   into a subpackage per service. If a request ever embeds a full entity
   message, its validation delegates to a matching
   `XxxEntityValidator.go` in the same flat package.
 - The registry and interceptor mechanism (`services/validation/`,
   singular) is generic and has no domain knowledge: a
-  `map[reflect.Type]Validator` plus a `connect.Interceptor` that looks
-  up and runs the right validator before every RPC. Every request type
-  gets one registered — even a trivially-always-valid one — so a
-  missing validator is a loud `CodeInternal` wiring bug, never a silent
-  skip.
+  `map[reflect.Type]Validator` plus an interceptor that looks up and
+  runs the right validator before every RPC. Every request type gets
+  one registered — even a trivially-always-valid one — so a missing
+  validator is a loud internal-error wiring bug, never a silent skip.
 - Format checks (resource-name shape, non-empty checks, etc.) are
   inlined per validator — no shared regex/shape-checking helper. A
   three-line check isn't worth extracting.
@@ -283,17 +285,18 @@ Every `core/` and `repository/` package:
 
 ## Resource Names and Containment
 
-- Resource names (`players/{p}`, `players/{p}/creatures/{c}`, …) are
-  **opaque keys everywhere** — never parsed to derive a parent or
-  owner, in `repository/`, `core/`, or `services/`.
+- Resource names (e.g. `accounts/{a}/orders/{o}`) are **opaque keys
+  everywhere** — never parsed to derive a parent or owner, in
+  `repository/`, `core/`, or `services/`.
 - Containment is a strict tree, decided by which side can have "many":
   a parent stores its children's name references; a child never stores
   a reference back to its parent. Two independent containment
-  relationships can coexist on the same entity (e.g. a `Player`'s
-  *permanent* ownership list vs. a `Nest`'s *temporary* placement list)
-  — don't collapse them into one.
+  relationships can coexist on the same entity (e.g. an account's
+  *permanent* ownership list of orders vs. a shopping cart's
+  *temporary* placement list of the same items) — don't collapse them
+  into one.
 - Reverse lookups ("who owns this child") go through a
-  repository-maintained reverse index (e.g. `PlayerRepository.FindOwner`),
+  repository-maintained reverse index (e.g. `AccountRepository.FindOwner`),
   populated at write time by whichever method adds the containment
   link — never a string-parse of the child's own name, and never a full
   table scan.
