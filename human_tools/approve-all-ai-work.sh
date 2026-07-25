@@ -68,31 +68,21 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 1
 fi
 
-# The workspace root's key is the default for every repo — most won't
-# bother setting their own. A submodule can still override it by setting
-# its own local gemini.apikey.
+# One key, from the workspace root's own local git config, used for
+# every repo — no per-repo config, no fallback chain. Read once here and
+# passed in explicitly rather than letting approve-ai-work.sh re-derive it
+# itself from cwd.
 WORKSPACE_KEY="$(git -C "$WORKSPACE_ROOT" config --get gemini.apikey || true)"
+if [ -z "$WORKSPACE_KEY" ]; then
+    echo "❌ No gemini.apikey configured on the workspace root." >&2
+    echo "   Set it with: git -C \"$WORKSPACE_ROOT\" config --local gemini.apikey 'YOUR_KEY_HERE'" >&2
+    exit 1
+fi
 
 for i in "${!TO_APPROVE_PATHS[@]}"; do
     echo ""
     echo "=== Approving ${TO_APPROVE_NAMES[$i]} ==="
-    repo_path="${TO_APPROVE_PATHS[$i]}"
-
-    # Read from this specific repo's own local git config first, and pass
-    # it in explicitly rather than relying on approve-ai-work.sh to
-    # re-derive it itself from cwd; fall back to the workspace root's key
-    # if this repo has none of its own.
-    repo_key="$(git -C "$repo_path" config --get gemini.apikey || true)"
-    if [ -z "$repo_key" ]; then
-        repo_key="$WORKSPACE_KEY"
-    fi
-    if [ -z "$repo_key" ]; then
-        echo "❌ No gemini.apikey configured for ${TO_APPROVE_NAMES[$i]} or the workspace root." >&2
-        echo "   Set it with: git -C \"$WORKSPACE_ROOT\" config --local gemini.apikey 'YOUR_KEY_HERE'" >&2
-        exit 1
-    fi
-
-    (cd "$repo_path" && GEMINI_API_KEY="$repo_key" "$APPROVE_SCRIPT")
+    (cd "${TO_APPROVE_PATHS[$i]}" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
 done
 
 echo ""

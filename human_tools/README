@@ -37,15 +37,14 @@ across all of them in one go instead of `cd`-ing into each one by hand.
 4. Only after that confirmation does it run `approve-ai-work.sh` for each
    one — submodules first, workspace root last, since the root's own
    `ai-work` diff typically includes submodule pointer bumps that only
-   make sense once each submodule has actually been merged. The workspace
-   root's `gemini.apikey` (`git config --local gemini.apikey '...'`, set
-   once at the root) is used as the key for every repo by default; a
-   submodule can set its own local `gemini.apikey` to override it
-   individually. Either way this script reads the key itself and passes
-   it in explicitly, rather than letting `approve-ai-work.sh` re-derive it
-   from whatever directory happens to be current. Stops with a clear
-   message if neither the repo nor the workspace root has a key set,
-   instead of letting `approve-ai-work.sh` fail deeper into its own flow.
+   make sense once each submodule has actually been merged. One
+   `gemini.apikey`, read from the workspace root's own local git config
+   (`git config --local gemini.apikey '...'`, set once there) — no
+   per-repo config, no fallback chain. This script reads it once and
+   passes it in explicitly to every repo, rather than letting
+   `approve-ai-work.sh` re-derive it itself from whatever directory
+   happens to be current. Stops with a clear message if the workspace
+   root has no key set.
 
 ```bash
 ./approve-all-ai-work.sh
