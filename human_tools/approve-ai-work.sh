@@ -78,13 +78,21 @@ PROMPT_CONTENT=$(cat "$PROMPT_FILE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
 echo "  - Calling Gemini API..."
-# Safely escape the prompt into a JSON payload using jq
-JSON_PAYLOAD=$(jq -n --arg text "$PROMPT_CONTENT" '{contents: [{parts: [{text: $text}]}]}')
+# The prompt embeds the full diff, which routinely exceeds the OS's
+# argv/environment size limit once a branch accumulates enough changes
+# ("Argument list too long") -- so both the jq escaping step and the
+# curl request body go through temp files instead of command-line
+# arguments, neither of which is subject to that limit.
+PROMPT_TMPFILE="$(mktemp)"
+PAYLOAD_TMPFILE="$(mktemp)"
+trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
+printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
+jq -n --rawfile text "$PROMPT_TMPFILE" '{contents: [{parts: [{text: $text}]}]}' > "$PAYLOAD_TMPFILE"
 
 # Call the REST API directly (using gemini-1.5-flash for speed/cost)
 API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d "$JSON_PAYLOAD")
+  --data-binary "@$PAYLOAD_TMPFILE")
 
 # Extract the generated text from the JSON response
 GEMINI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')

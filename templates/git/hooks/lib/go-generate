@@ -2,20 +2,31 @@
 # Regenerates and, if that changed anything, commits it as its own commit
 # — same reasoning as cassette-check auto-committing expected noise:
 # generated output needing a refresh shouldn't fail the commit/push over
-# it. One script for both the pre-commit and pre-push call sites, since
-# "regenerate, commit if changed" is the same operation either way. Skips
-# gracefully if the repo isn't a Go module.
+# it. Skips gracefully if the repo isn't a Go module.
+#
+# --stage-only swaps that commit for a plain `git add`, for callers
+# running inside a pre-commit hook: a pre-commit hook runs nested inside
+# an already-in-progress `git commit`, which has already locked in the
+# parent commit it intends to update HEAD from. A second, independent
+# `git commit` run by this script in that window moves HEAD out from
+# under it, and the outer commit's own HEAD update then fails (it's
+# still holding the now-stale parent it captured before hooks ran).
+# Staging instead lets the outer commit absorb the change itself, with
+# no separate ref update involved. A pre-push caller isn't nested inside
+# a commit's ref update, so it keeps the default (separate, clearly
+# labeled) commit.
 set -e
 
 for arg in "$@"; do
     case "$arg" in
         --repo=*) REPO="${arg#--repo=}" ;;
         --generated-dir=*) GEN_DIR="${arg#--generated-dir=}" ;;
+        --stage-only) STAGE_ONLY=1 ;;
         *) echo "❌ go-generate: unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
 if [ -z "${REPO:-}" ] || [ -z "${GEN_DIR:-}" ]; then
-    echo "❌ go-generate: usage: go-generate --repo=<path> --generated-dir=<relative>" >&2
+    echo "❌ go-generate: usage: go-generate --repo=<path> --generated-dir=<relative> [--stage-only]" >&2
     exit 1
 fi
 
@@ -23,6 +34,18 @@ if [ ! -f "$REPO/go.mod" ]; then
     echo "⏭️ No go.mod found. Skipping go generate for this repository."
     exit 0
 fi
+
+# go generate only ever writes files a current source asks for — it never
+# deletes an output whose source was since renamed, moved, or removed, so
+# a stale generated file can silently linger and, for proto in
+# particular, collide at runtime with whatever now generates from the
+# same message/service names. $GEN_DIR is entirely generated output (by
+# convention: nothing hand-written lives under it), so wiping it clean
+# before every regeneration is safe and is what actually keeps it
+# accurate — the diff check below still only stages/commits it if the
+# rebuilt contents differ from what's tracked.
+rm -rf "${REPO:?}/$GEN_DIR"
+mkdir -p "$REPO/$GEN_DIR"
 
 echo "🧪 go generate ./..."
 if ! go -C "$REPO" generate ./...; then
@@ -33,6 +56,13 @@ fi
 CHANGES=$(git -C "$REPO" status --porcelain -- "$GEN_DIR")
 if [ -z "$CHANGES" ]; then
     echo "✓ $GEN_DIR is up to date"
+    exit 0
+fi
+
+if [ -n "${STAGE_ONLY:-}" ]; then
+    echo "⚠️  $GEN_DIR changed — staging into the in-progress commit..."
+    git -C "$REPO" add "$GEN_DIR"
+    echo "✓ $GEN_DIR staged"
     exit 0
 fi
 

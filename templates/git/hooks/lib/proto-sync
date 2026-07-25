@@ -4,6 +4,17 @@
 # else to notice it — same auto-commit reasoning as cassette-check and
 # go-generate. Called once per destination — a caller syncing to N places
 # calls this N times.
+#
+# --stage-only swaps that commit for a plain `git add`, for callers
+# running inside a pre-commit hook of the same repo as $DEST: a
+# pre-commit hook runs nested inside an already-in-progress `git commit`,
+# which has already locked in the parent commit it intends to update HEAD
+# from. A second, independent `git commit` run by this script in that
+# window moves HEAD out from under it, and the outer commit's own HEAD
+# update then fails. Staging instead lets the outer commit absorb the
+# change itself, with no separate ref update involved. A caller whose
+# $DEST isn't nested inside its own in-progress commit keeps the default
+# (separate, clearly labeled) commit.
 set -e
 
 # git sets GIT_DIR (etc.) when invoking a hook, pointing at the invoking
@@ -20,11 +31,12 @@ for arg in "$@"; do
     case "$arg" in
         --dest=*) DEST="${arg#--dest=}" ;;
         --source=*) SOURCE_DIR="${arg#--source=}" ;;
+        --stage-only) STAGE_ONLY=1 ;;
         *) echo "❌ proto-sync: unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
 if [ -z "${DEST:-}" ] || [ -z "${SOURCE_DIR:-}" ]; then
-    echo "❌ proto-sync: usage: proto-sync --dest=<dir> --source=<dir>" >&2
+    echo "❌ proto-sync: usage: proto-sync --dest=<dir> --source=<dir> [--stage-only]" >&2
     exit 1
 fi
 
@@ -43,5 +55,11 @@ if [ -z "$CHANGES" ]; then
 fi
 
 git -C "$DEST" add .
+
+if [ -n "${STAGE_ONLY:-}" ]; then
+    echo "📄 synced *.proto from $SOURCE_DIR into $DEST and staged into the in-progress commit"
+    exit 0
+fi
+
 git -C "$DEST" commit --no-verify -m "chore: sync proto from $SOURCE_DIR" -- .
 echo "📄 synced *.proto from $SOURCE_DIR into $DEST and committed"
