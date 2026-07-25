@@ -24,10 +24,12 @@ CASSETTE_FILES=$(echo "$CHANGED_FILES" | grep "cassettes/" || true)
 
 if [ -n "$CASSETTE_FILES" ]; then
     echo "📼 Committing cassette changes..."
-    echo "$CASSETTE_FILES" | while IFS= read -r f; do
-        [ -n "$f" ] && git -C "$REPO" add -- "$f"
-    done
-    git -C "$REPO" commit --no-verify -m "test: update cassettes from pre-push test run"
+    CASSETTE_FILE_ARGS=()
+    while IFS= read -r f; do
+        [ -n "$f" ] && CASSETTE_FILE_ARGS+=("$f")
+    done <<< "$CASSETTE_FILES"
+    git -C "$REPO" add -- "${CASSETTE_FILE_ARGS[@]}"
+    git -C "$REPO" commit --no-verify -m "test: update cassettes from pre-push test run" -- "${CASSETTE_FILE_ARGS[@]}"
     echo "✓ Cassettes committed"
 else
     echo "✓ No cassette changes"

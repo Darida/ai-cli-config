@@ -67,6 +67,18 @@ up.
   before being caught. All three auto-committing scripts now use `git
   commit --no-verify` for exactly this reason — any new auto-commit added
   here needs it too if it could ever run from inside `pre-commit`.
+- **Scoping the `add`, without also scoping the `commit`, doesn't scope
+  the commit.** `git commit` with no pathspec commits the *entire index*,
+  not just what the script itself just staged. A caller further up the
+  chain (`push-all` does `git add -A` before its own `git commit`) can
+  leave unrelated files already staged when one of these scripts runs —
+  and without a trailing `-- <pathspec>` on the `commit` matching the
+  `add`, all of that gets swept into the auto-commit and mislabeled under
+  its generic message (e.g. everything landing in a commit titled "chore:
+  regenerate gen"). All three scripts now pass the same pathspec to both
+  `add` and `commit`. Any new auto-commit added here must do the same, or
+  the "never commits outside what it specifically touched" claim above is
+  false in practice even though the `add` line alone looks correct.
 
 Verify any new cross-repo `git -C` call or subshell-scoped `cd` the same
 way: by actually running the hook, not just reading it.
