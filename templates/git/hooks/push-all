@@ -1,11 +1,15 @@
 #!/bin/bash
 # Generic checkpoint script, shared across whatever projects use this
 # template. Takes a single input - the commit message - and discovers
-# everything else itself:
+# everything else itself, via git, with no assumption about how deep this
+# repo is checked out or what it's nested inside:
 #
-#   - Workspace root: this script's own location. It's checked out as
-#     <workspace>/ai-cli-config/templates/git/hooks/push-all, so four
-#     levels up is the workspace root.
+#   - Workspace root: ask git. `rev-parse --show-toplevel` finds this
+#     script's own repo root regardless of how deep inside it the script
+#     lives; `rev-parse --show-superproject-working-tree` from there finds
+#     the outer repo that has it checked out as a submodule, if any - that
+#     outer repo is "the workspace". If there isn't one (this repo isn't
+#     anyone's submodule), the workspace is just this repo itself.
 #   - Which repos to commit, and in what order: the workspace's own
 #     .gitmodules, read in file order (falls back to scanning direct
 #     child directories for a .git entry if there's no .gitmodules).
@@ -31,7 +35,9 @@ fi
 MESSAGE="$1"
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+CONFIG_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
 
 COMMIT_MSG="$MESSAGE
 
