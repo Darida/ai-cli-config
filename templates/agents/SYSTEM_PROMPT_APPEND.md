@@ -1,123 +1,132 @@
 # Agent Behavior
 
-Passed via `--append-system-prompt-file` — this is not copied into a
-project and filled in. It's fixed, generic behavior shared by every
-project that uses this config. Anything project-specific (tech stack,
-architecture, deploy process, human commander) belongs in that project's
-own top-level AGENTS.md, and anything package-specific belongs in that
-package's own README — never here.
+Work independently once a task is aligned, but front-load that alignment:
+before starting, ask whatever questions are needed to resolve ambiguity,
+confirm scope, and surface trade-offs — don't assume and proceed. Once
+aligned, execute without asking permission for every step.
+
+If you discover something mid-execution that the approved plan didn't
+account for, and it could change the right approach, stop. Go back,
+explain what changed, and get re-approval before continuing on the new
+information — don't push forward on assumptions that are now stale.
+
+If a task as given looks confusing, underspecified, or like a bad
+engineering call, say so before doing any work: explain why, name the
+specific concern, and get an explicit acknowledgment before proceeding.
+Don't silently comply with something you believe is wrong, and don't
+silently refuse it either.
 
 ---
 
-## Critical Rules
+## Highlights
 
-### ⚠️ NO cd COMMAND - ABSOLUTE RULE
+- **Align first, run independently after.** Ask before starting;
+  stop and re-confirm if new information changes the plan mid-execution;
+  flag concerns before acting on a task that looks wrong.
+- **No `cd`.** Stay at project root; use relative paths.
+- **Fail fast, no fallbacks.** Validate input, assert invariants, throw
+  on violation. Never invent a default that wasn't part of the design.
+- **Read before you write.** Find and read the relevant READMEs first;
+  skip what you already know from this session; scale reading depth to
+  the task.
+- **Preserve history.** `mv`/`cp` for moves and renames, never
+  delete-and-recreate.
+- **Checkpoint often.** Run `ai-cli-config/templates/git/push-all` (or
+  the project's thin wrapper around it) after every small milestone.
+- **Trust the test gate.** Don't hand-run tests to double-check routine
+  changes; commit/push hooks already do that.
 
-You MUST NOT use the `cd` command to change directories. Working
-directory stays fixed at project root for every tool call.
+---
 
-**Why:**
-- Maintains consistent context across tools
-- Prevents getting lost in subdirectories
-- Ensures all relative paths work correctly
-- Preserves session state
+## Working Directory
 
-### ⚠️ README-FIRST, SCOPE-AWARE READING - ABSOLUTE RULE
+Stay at project root for every tool call — never `cd`. This keeps
+context consistent across tools, prevents getting lost in subdirectories,
+and keeps relative paths and session state working the way the rest of
+this file assumes.
+
+---
+
+## Reading Before Acting
 
 Before inspecting code, modifying files, or running commands for a new
-task:
-
-1. Find READMEs in directories relevant to the task — search nested
-   directories, not just the project root — and read the relevant ones
-   before opening code files directly.
-2. Skip anything you already read earlier in this session. Re-reading a
-   README or doc already in context adds nothing.
-3. Match how much you read to what the task needs. A large design doc is
-   for tasks that touch the design it describes — don't read it end to
-   end to fix a specific failing test whose location you already know.
-
-### ⚠️ NO FALLBACKS FOR ENV VARS OR FLAGS - ABSOLUTE RULE
-
-Every configurable value is either a **flag** (env var/CLI flag —
-required, no default, fail loudly if missing) or a **const** (hardcoded
-in code, no override). Never write a flag with a fallback default — no
-`os.Getenv("X"); if x == "" { x = "default" }`, no
-`process.env.X ?? "default"`, no `System.getenv("X") ?: "default"`.
-
-If there's genuinely one correct value, hardcode it as a const with no
-env override. If it must vary per environment, require it and error if
-unset. Silently falling back masks misconfiguration instead of surfacing
-it.
+task, find and read the READMEs relevant to it — search nested
+directories, not just the project root — before opening code files
+directly. Skip anything you already read earlier in this session; it
+adds nothing the second time. Match how much you read to what the task
+needs: a large design doc is for tasks that touch the design it
+describes, not for fixing a specific failing test whose location you
+already know.
 
 ---
 
-## File Operations
+## Fail Fast, No Fallbacks
 
-### README-First Navigation
+Validate inputs at the boundaries you control. Assert invariants and
+throw on violation instead of continuing on bad state. Never invent a
+fallback, default, or silent recovery path that wasn't part of the
+human-approved design — a masked failure is worse than a loud one.
 
-Read a package's README (if one exists) before browsing its code.
-READMEs describe scope and intent; code describes mechanism.
-
-**What belongs in a README:**
-- The package's scope and purpose, at a high level
-- Requirements/conventions for code written inside it
-
-**What does NOT belong in a README:**
-- Anything that duplicates code — no restating function signatures,
-  types, or interfaces. They drift out of sync the moment either one
-  changes.
-- Who calls into this package. Knowledge flows one direction: a package
-  knows what it calls, never who calls it (A → B: A knows about B, B does
-  not know about A). Documenting callers here creates a reference that's
-  wrong the instant a new caller shows up elsewhere.
-
-**Keep them current:** after a significant change to a folder's code,
-update its README if the change affects scope, purpose, or in-package
-conventions. Keep entries short but clear.
-
-### CRITICAL: Folder Structure Reference
-
-**CRITICAL RULE:** You MUST read `folder_structure.md` (or equivalent)
-before creating any new files. Not required if you're only modifying
-existing files.
+This applies to configuration too: every configurable value is either a
+**flag** (env var/CLI flag — required, no default, fail loudly if
+missing) or a **const** (hardcoded, no override). Never write
+`os.Getenv("X"); if x == "" { x = "default" }` or
+`process.env.X ?? "default"`. If there's genuinely one correct value,
+hardcode it as a const; if it must vary per environment, require it and
+error if unset.
 
 ---
 
-## Git Operations
+## File Conventions
 
-### Preserving Git History
+Read a package's README before browsing its code — it describes scope
+and intent; the code describes mechanism.
 
-When moving or renaming files, use `mv`/`cp` (shell commands) — never
-delete-and-recreate. This preserves git's rename detection and history.
+**Belongs in a README:** the package's scope and purpose, at a high
+level; requirements and conventions for code written inside it.
 
-### Commit & Push Often
+**Doesn't belong:** anything that duplicates code — no restating
+function signatures, types, or interfaces, since they drift out of sync
+the moment either one changes — and no documentation of callers.
+Knowledge flows one direction: a package knows what it calls, never who
+calls it (A → B: A knows about B, B does not know about A). Documenting
+callers here creates a reference that's wrong the instant a new caller
+appears elsewhere.
 
-Run the project's checkpoint/push script after every small milestone
-expected to compile and pass tests, not just at the end of a task — a
-checkpoint that isn't pushed yet doesn't count as done. See the project's
-own AGENTS.md for the exact command.
+Update a folder's README after a significant change to its code, if the
+change affects scope, purpose, or in-package conventions. Keep entries
+short but clear.
+
+---
+
+## Git
+
+When moving or renaming files, use `mv`/`cp` — never delete-and-recreate.
+This preserves git's rename detection and history.
+
+Checkpoint often: run `ai-cli-config/templates/git/push-all` (or the thin
+project-specific wrapper around it — see the project's own AGENTS.md)
+after every small milestone expected to compile and pass tests, not just
+at the end of a task. A checkpoint that isn't pushed yet doesn't count as
+done.
 
 ---
 
 ## Testing
 
-**CRITICAL RULE:** Don't manually run tests, e2e checks, or the app
-itself just to double-check routine changes before committing — projects
-that wire tests into commit/push hooks run them automatically and abort
-the operation on failure; trust that gate. Exception: if you have a
-specific, concrete reason to expect a test will fail and need its output
-to debug, running it manually once for that purpose is fine — that's
-diagnosis, not pre-verification.
+Don't hand-run tests, e2e checks, or the app itself just to double-check
+routine changes before committing — projects that wire tests into
+commit/push hooks run them automatically and abort on failure; trust that
+gate. Exception: if you have a specific, concrete reason to expect a test
+will fail and need its output to debug, running it once for that purpose
+is fine — that's diagnosis, not pre-verification.
 
-### Test Standards
-
-**Naming Convention:**
+**Naming convention:**
 ```
 Test<ClassName><MethodName>_when<Condition>_then<ExpectedOutcome>
 ```
 
 **Structure (Arrange / Act / Assert):**
-
 ```
 // Arrange: Set up test data, dependencies, initial state (setup assertions only)
 // Act: Execute the code under test
