@@ -45,19 +45,20 @@ for path in "${SUBMODULE_PATHS[@]}"; do
     fi
 done
 
-# Just informational here — approving any submodule below updates the
-# workspace root's submodule pointers, so the root may end up needing
-# approval even if this check finds nothing right now.
-WORKSPACE_HAS_CHANGES=0
+# Just informational here — approving any submodule below always updates
+# the workspace root's submodule pointers, so the root ends up needing
+# approval either because of this check or because the loop ran at all
+# (see the final approval step).
+WORKSPACE_HAD_CHANGES=0
 if has_pending_changes "$WORKSPACE_ROOT"; then
     echo "  workspace root: $(compare_url "$WORKSPACE_ROOT")"
-    WORKSPACE_HAS_CHANGES=1
+    WORKSPACE_HAD_CHANGES=1
 else
     echo "  workspace root: no changes, skipping"
 fi
 echo ""
 
-if [ "${#SUBMODULES_TO_APPROVE[@]}" -eq 0 ] && [ "$WORKSPACE_HAS_CHANGES" -eq 0 ]; then
+if [ "${#SUBMODULES_TO_APPROVE[@]}" -eq 0 ] && [ "$WORKSPACE_HAD_CHANGES" -eq 0 ]; then
     echo "✅ Nothing to approve anywhere."
     exit 0
 fi
@@ -94,10 +95,9 @@ for name in "${SUBMODULES_TO_APPROVE[@]}"; do
     git -C "$WORKSPACE_ROOT" add "$name"
     git -C "$WORKSPACE_ROOT" commit -m "chore: sync $name submodule pointer after approval"
     git -C "$WORKSPACE_ROOT" push origin ai-work
-    WORKSPACE_HAS_CHANGES=1
 done
 
-if [ "$WORKSPACE_HAS_CHANGES" -eq 1 ]; then
+if [ "$WORKSPACE_HAD_CHANGES" -eq 1 ] || [ "${#SUBMODULES_TO_APPROVE[@]}" -gt 0 ]; then
     echo ""
     echo "=== Approving workspace root ==="
     (cd "$WORKSPACE_ROOT" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
