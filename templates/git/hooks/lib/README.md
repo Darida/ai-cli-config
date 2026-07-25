@@ -17,6 +17,8 @@ up.
 
 - `check-branch --repo=`
 - `go-test --repo=` — skips if not a Go module
+- `npm-test --repo=` — skips if no `package.json`; otherwise runs `npm
+  test`
 - `go-generate --repo= --generated-dir=` — skips if not a Go module;
   regenerates and auto-commits if that changed the generated dir. Run
   this *before* `go-test`, not after — otherwise tests can run against
