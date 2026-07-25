@@ -34,29 +34,30 @@ has_pending_changes() {
 
 mapfile -t SUBMODULE_PATHS < <(git config --file "$WORKSPACE_ROOT/.gitmodules" --get-regexp '\.path$' | awk '{print $2}')
 
-TO_APPROVE_NAMES=()
-TO_APPROVE_PATHS=()
+SUBMODULES_TO_APPROVE=()
 echo "=== ai-work -> main review links ==="
 for path in "${SUBMODULE_PATHS[@]}"; do
-    full_path="$WORKSPACE_ROOT/$path"
-    if has_pending_changes "$full_path"; then
-        echo "  $path: $(compare_url "$full_path")"
-        TO_APPROVE_NAMES+=("$path")
-        TO_APPROVE_PATHS+=("$full_path")
+    if has_pending_changes "$WORKSPACE_ROOT/$path"; then
+        echo "  $path: $(compare_url "$WORKSPACE_ROOT/$path")"
+        SUBMODULES_TO_APPROVE+=("$path")
     else
         echo "  $path: no changes, skipping"
     fi
 done
+
+# Just informational here — approving any submodule below updates the
+# workspace root's submodule pointers, so the root may end up needing
+# approval even if this check finds nothing right now.
+WORKSPACE_HAS_CHANGES=0
 if has_pending_changes "$WORKSPACE_ROOT"; then
     echo "  workspace root: $(compare_url "$WORKSPACE_ROOT")"
-    TO_APPROVE_NAMES+=("workspace root")
-    TO_APPROVE_PATHS+=("$WORKSPACE_ROOT")
+    WORKSPACE_HAS_CHANGES=1
 else
     echo "  workspace root: no changes, skipping"
 fi
 echo ""
 
-if [ "${#TO_APPROVE_PATHS[@]}" -eq 0 ]; then
+if [ "${#SUBMODULES_TO_APPROVE[@]}" -eq 0 ] && [ "$WORKSPACE_HAS_CHANGES" -eq 0 ]; then
     echo "✅ Nothing to approve anywhere."
     exit 0
 fi
@@ -79,27 +80,30 @@ if [ -z "$WORKSPACE_KEY" ]; then
     exit 1
 fi
 
-for i in "${!TO_APPROVE_PATHS[@]}"; do
+for name in "${SUBMODULES_TO_APPROVE[@]}"; do
     echo ""
-    echo "=== Approving ${TO_APPROVE_NAMES[$i]} ==="
-    repo_path="${TO_APPROVE_PATHS[$i]}"
-    (cd "$repo_path" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+    echo "=== Approving $name ==="
+    (cd "$WORKSPACE_ROOT/$name" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
 
     # Approving a submodule squash-merges it and resets its ai-work branch
     # to match the new main — moving its checked-out commit. That leaves
-    # the workspace root's recorded pointer for it stale, which
-    # approve-ai-work.sh's own "no uncommitted changes" check would then
-    # refuse to see past on the next repo. Sync it now, before that
-    # happens.
-    if [ "$repo_path" != "$WORKSPACE_ROOT" ]; then
-        submodule_name="${TO_APPROVE_NAMES[$i]}"
-        if [ -n "$(git -C "$WORKSPACE_ROOT" status --porcelain -- "$submodule_name")" ]; then
-            git -C "$WORKSPACE_ROOT" add "$submodule_name"
-            git -C "$WORKSPACE_ROOT" commit -m "chore: sync $submodule_name submodule pointer after approval"
-            git -C "$WORKSPACE_ROOT" push origin ai-work
-        fi
+    # the workspace root's recorded pointer for it stale, and even if the
+    # workspace root had nothing pending before, it does now. Sync it
+    # immediately rather than letting it surprise the workspace root's own
+    # turn below.
+    if [ -n "$(git -C "$WORKSPACE_ROOT" status --porcelain -- "$name")" ]; then
+        git -C "$WORKSPACE_ROOT" add "$name"
+        git -C "$WORKSPACE_ROOT" commit -m "chore: sync $name submodule pointer after approval"
+        git -C "$WORKSPACE_ROOT" push origin ai-work
+        WORKSPACE_HAS_CHANGES=1
     fi
 done
+
+if [ "$WORKSPACE_HAS_CHANGES" -eq 1 ]; then
+    echo ""
+    echo "=== Approving workspace root ==="
+    (cd "$WORKSPACE_ROOT" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+fi
 
 echo ""
 echo "✅ approve-all-ai-work done"

@@ -30,27 +30,29 @@ across all of them in one go instead of `cd`-ing into each one by hand.
 2. For each submodule, then the workspace root itself, checks whether
    `ai-work` actually has anything `main` doesn't. Repos with nothing
    pending are skipped entirely — no link shown, `approve-ai-work.sh`
-   never runs for them.
+   never runs for them. Note this workspace-root check only reflects
+   things as they stand *right now* — see step 4.
 3. Prints the GitHub compare link (`.../compare/ai-work?expand=1`) for
    every repo that does have pending changes, and pauses for one
    confirmation before doing anything else.
-4. Only after that confirmation does it run `approve-ai-work.sh` for each
-   one — submodules first, workspace root last, since the root's own
-   `ai-work` diff typically includes submodule pointer bumps that only
-   make sense once each submodule has actually been merged. One
-   `gemini.apikey`, read from the workspace root's own local git config
-   (`git config --local gemini.apikey '...'`, set once there) — no
-   per-repo config, no fallback chain. This script reads it once and
-   passes it in explicitly to every repo, rather than letting
-   `approve-ai-work.sh` re-derive it itself from whatever directory
-   happens to be current. Stops with a clear message if the workspace
-   root has no key set.
-5. Approving a submodule squash-merges it and resets its `ai-work` to
-   match the new `main` — moving its checked-out commit. Immediately
-   after each submodule, this script commits and pushes that pointer bump
-   in the workspace root before moving on, so the workspace root's own
-   turn (and `approve-ai-work.sh`'s "no uncommitted changes" check) never
-   sees it as an unexpected dirty change.
+4. Only after that confirmation does it loop over the submodules that had
+   pending changes — nothing else, workspace root is handled separately
+   afterward, not as another iteration of this loop. For each submodule:
+   run `approve-ai-work.sh` (squash-merges it and resets its `ai-work` to
+   match the new `main`, moving its checked-out commit), then immediately
+   commit and push the resulting submodule-pointer bump in the workspace
+   root. That means the workspace root can end up with something to
+   approve even if step 2 found nothing there — approving *any* submodule
+   guarantees the root now has at least that pointer-bump commit pending.
+   So after the loop, `approve-ai-work.sh` runs once for the workspace
+   root if either step 2 found it already had changes, or the loop above
+   gave it some.
+5. One `gemini.apikey`, read from the workspace root's own local git
+   config (`git config --local gemini.apikey '...'`, set once there) — no
+   per-repo config, no fallback chain. Read once and passed in explicitly
+   to every repo, rather than letting `approve-ai-work.sh` re-derive it
+   itself from whatever directory happens to be current. Stops with a
+   clear message if the workspace root has no key set.
 
 ```bash
 ./approve-all-ai-work.sh
