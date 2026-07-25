@@ -5,6 +5,7 @@ LIB="$(dirname "$0")/lib"
 REPO="$(pwd)"
 
 "$LIB/check-branch" --repo="$REPO"
+"$LIB/go-generate" --repo="$REPO" --generated-dir=gen
 "$LIB/go-test" --repo="$REPO"
 "$LIB/cassette-check" --repo="$REPO"
 "$LIB/require-clean" --repo="$REPO"
