@@ -7,8 +7,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Pull the API key specific to this local git repository
-GEMINI_API_KEY=$(git config --get gemini.apikey || echo "")
+# Accept the key as an input if the caller already has it (e.g.
+# approve-all-ai-work.sh reads it from each target repo's own local git
+# config before invoking this script) — otherwise fall back to reading it
+# from the current repo's git config, for standalone use.
+GEMINI_API_KEY="${GEMINI_API_KEY:-$(git config --get gemini.apikey || echo "")}"
 
 if [ -z "$GEMINI_API_KEY" ]; then
   echo -e "${RED}Error: API key not found for this project.${NC}"

@@ -37,7 +37,14 @@ across all of them in one go instead of `cd`-ing into each one by hand.
 4. Only after that confirmation does it run `approve-ai-work.sh` for each
    one — submodules first, workspace root last, since the root's own
    `ai-work` diff typically includes submodule pointer bumps that only
-   make sense once each submodule has actually been merged.
+   make sense once each submodule has actually been merged. Each repo may
+   have its own `gemini.apikey` configured (`git config --local
+   gemini.apikey '...'`, per repo) — this script reads it from that
+   specific repo before invoking `approve-ai-work.sh` for it, rather than
+   letting `approve-ai-work.sh` re-derive it from whatever directory
+   happens to be current. Stops with a clear message if a repo has no key
+   set, instead of letting `approve-ai-work.sh` fail deeper into its own
+   flow.
 
 ```bash
 ./approve-all-ai-work.sh

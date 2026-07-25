@@ -71,7 +71,20 @@ fi
 for i in "${!TO_APPROVE_PATHS[@]}"; do
     echo ""
     echo "=== Approving ${TO_APPROVE_NAMES[$i]} ==="
-    (cd "${TO_APPROVE_PATHS[$i]}" && "$APPROVE_SCRIPT")
+    repo_path="${TO_APPROVE_PATHS[$i]}"
+
+    # Read from this specific repo's own local git config — not the
+    # orchestrator's, not a global one — since different repos may have
+    # different keys configured, and pass it in explicitly rather than
+    # relying on approve-ai-work.sh to re-derive it itself from cwd.
+    repo_key="$(git -C "$repo_path" config --get gemini.apikey || true)"
+    if [ -z "$repo_key" ]; then
+        echo "❌ No gemini.apikey configured for ${TO_APPROVE_NAMES[$i]}." >&2
+        echo "   Set it with: git -C \"$repo_path\" config --local gemini.apikey 'YOUR_KEY_HERE'" >&2
+        exit 1
+    fi
+
+    (cd "$repo_path" && GEMINI_API_KEY="$repo_key" "$APPROVE_SCRIPT")
 done
 
 echo ""
