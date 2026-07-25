@@ -1,8 +1,9 @@
 #!/bin/bash
-# Test runs can leave behind refreshed cassette fixtures as a side effect
-# — that's expected noise, not something to block a push over, so it gets
-# committed automatically rather than making every push fail on it.
-# Anything else uncommitted is a real problem and still blocks the push.
+# Test runs can leave behind refreshed cassette fixtures as a side effect.
+# Committing just those files (never `add -A`) clears that expected noise
+# without touching anything else uncommitted, and never blocks the push
+# over it either way — whether anything is still left uncommitted
+# afterward is require-clean's job, not this script's.
 set -e
 
 for arg in "$@"; do
@@ -16,30 +17,24 @@ if [ -z "${REPO:-}" ]; then
     exit 1
 fi
 
-echo "📋 Checking for uncommitted changes..."
-UNCOMMITTED=$(git -C "$REPO" status --short)
+CHANGED_FILES=$(
+    { git -C "$REPO" diff --name-only HEAD --; git -C "$REPO" ls-files --others --exclude-standard; } 2>/dev/null | sort -u
+)
+CASSETTE_FILES=$(echo "$CHANGED_FILES" | grep "cassettes/" || true)
 
-if [ -z "$UNCOMMITTED" ]; then
-    echo "✓ No uncommitted changes"
-    exit 0
-fi
-
-echo "⚠️  Found uncommitted changes:"
-echo "$UNCOMMITTED"
-echo ""
-
-CASSETTE_CHANGES=$(echo "$UNCOMMITTED" | grep -c "cassettes/" || true)
-TOTAL_CHANGES=$(echo "$UNCOMMITTED" | wc -l)
-
-if [ "$CASSETTE_CHANGES" -eq "$TOTAL_CHANGES" ] && [ "$TOTAL_CHANGES" -gt 0 ]; then
-    echo "✓ All changes are cassettes - committing automatically..."
-    git -C "$REPO" add -A
-    git -C "$REPO" commit -m "test: update cassette timestamps from pre-push test run
-
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+if [ -n "$CASSETTE_FILES" ]; then
+    echo "📼 Committing cassette changes..."
+    echo "$CASSETTE_FILES" | while IFS= read -r f; do
+        [ -n "$f" ] && git -C "$REPO" add -- "$f"
+    done
+    git -C "$REPO" commit -m "test: update cassettes from pre-push test run"
     echo "✓ Cassettes committed"
 else
-    echo "❌ Found non-cassette uncommitted changes! Push aborted."
-    echo "Please review and commit/discard these changes manually."
-    exit 1
+    echo "✓ No cassette changes"
+fi
+
+REMAINING=$(git -C "$REPO" status --porcelain)
+if [ -n "$REMAINING" ]; then
+    echo "ℹ️  Other uncommitted changes remain (not this script's job):"
+    echo "$REMAINING"
 fi

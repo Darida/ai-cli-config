@@ -1,0 +1,27 @@
+#!/bin/bash
+# The actual gate: nothing may be left uncommitted by the time this runs.
+# Kept separate from scripts that can fix things automatically
+# (cassette-check, go-generate, proto-sync) so blocking behavior lives in
+# exactly one place, run after they've had their chance to clean things up.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ require-clean: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ require-clean: usage: require-clean --repo=<path>" >&2
+    exit 1
+fi
+
+UNCOMMITTED=$(git -C "$REPO" status --porcelain)
+if [ -n "$UNCOMMITTED" ]; then
+    echo "❌ Uncommitted changes found — push aborted:" >&2
+    echo "$UNCOMMITTED" >&2
+    echo "Please review and commit/discard these changes manually." >&2
+    exit 1
+fi
+
+echo "✓ Nothing uncommitted"

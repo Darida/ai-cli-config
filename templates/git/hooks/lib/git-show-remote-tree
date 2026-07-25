@@ -5,9 +5,12 @@
 set -e
 
 # git sets GIT_DIR (etc.) when invoking a hook, pointing at the invoking
-# repo's own git dir. That env var overrides `-C` on nested git commands —
-# without unsetting it, this could silently operate on the wrong repo when
-# the target repo differs from the one that invoked the hook.
+# repo's own git dir. That's scoped to this process only — env var changes
+# never propagate back to the parent once this script exits, so there's
+# nothing to restore before returning. It still has to be unset here
+# first, though: left set, it would override `-C` on the git commands
+# below and silently target the wrong repo whenever the target repo
+# differs from the one that invoked the hook.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
 
 for arg in "$@"; do
