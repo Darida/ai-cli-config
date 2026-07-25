@@ -41,9 +41,11 @@ if [ "$MERGE_BASE" != "$(git rev-parse origin/main)" ] && [ "$MERGE_BASE" != "$(
   echo -e "${YELLOW}bypassing this workflow). To reconcile, run (full path included since${NC}"
   echo -e "${YELLOW}you may not be sitting in this repo's directory):${NC}"
   echo -e "  ${GREEN}git -C \"$REPO_PATH\" merge origin/main --no-edit || git -C \"$REPO_PATH\" merge --abort${NC}"
-  echo -e "${YELLOW}That merges cleanly if there's no real conflict, or aborts back to the${NC}"
-  echo -e "${YELLOW}exact state you're in now if there is — safe either way. If it merges,${NC}"
-  echo -e "${YELLOW}push it (git -C \"$REPO_PATH\" push origin ai-work) and re-run this script.${NC}"
+  echo -e "${YELLOW}That merges cleanly if there's no real conflict (--no-edit skips the${NC}"
+  echo -e "${YELLOW}commit-message editor, so it won't open an interactive window), or${NC}"
+  echo -e "${YELLOW}aborts back to the exact state you're in now if there is — safe either${NC}"
+  echo -e "${YELLOW}way. If it merges, push it and re-run this script:${NC}"
+  echo -e "  ${GREEN}git -C \"$REPO_PATH\" push origin ai-work${NC}"
   exit 1
 fi
 echo -e "${GREEN}✓ ai-work branch state is clean${NC}\n"
