@@ -1,0 +1,35 @@
+#!/bin/bash
+# Copies then stages in one step, so whatever commits next in the
+# destination's repo can never drift from the source's current state.
+# Called once per destination — a caller syncing to N places calls this N
+# times.
+set -e
+
+# git sets GIT_DIR (etc.) when invoking a hook, pointing at the invoking
+# repo's own git dir. That env var overrides `-C` on nested git commands —
+# without unsetting it, staging could silently target the wrong repo when
+# the destination belongs to a different repo than the caller (e.g. one
+# repo syncing into a sibling's working tree).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+for arg in "$@"; do
+    case "$arg" in
+        --dest=*) DEST="${arg#--dest=}" ;;
+        --source=*) SOURCE_DIR="${arg#--source=}" ;;
+        *) echo "❌ proto-sync: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${DEST:-}" ] || [ -z "${SOURCE_DIR:-}" ]; then
+    echo "❌ proto-sync: usage: proto-sync --dest=<dir> --source=<dir>" >&2
+    exit 1
+fi
+
+if [ ! -d "$SOURCE_DIR" ]; then
+    echo "❌ proto-sync: $SOURCE_DIR not found" >&2
+    exit 1
+fi
+
+mkdir -p "$DEST"
+(cd "$SOURCE_DIR" && find . -name '*.proto' -exec cp --parents {} "$DEST/" \;)
+git -C "$DEST" add .
+echo "📄 synced *.proto from $SOURCE_DIR into $DEST"

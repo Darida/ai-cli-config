@@ -1,0 +1,29 @@
+#!/bin/bash
+# Skips gracefully rather than failing when the given repo isn't a Go
+# module — this gets called unconditionally for every repo, most of which
+# aren't Go.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ go-test: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ go-test: usage: go-test --repo=<path>" >&2
+    exit 1
+fi
+
+if [ ! -f "$REPO/go.mod" ]; then
+    echo "⏭️ No go.mod found. Skipping Go tests for this repository."
+    exit 0
+fi
+
+echo "🧪 go test ./..."
+if ! go -C "$REPO" test ./... -v -timeout 30s; then
+    echo ""
+    echo "❌ Tests failed! Push aborted."
+    echo "Fix the failing tests and try again."
+    exit 1
+fi

@@ -1,0 +1,27 @@
+#!/bin/bash
+# Aborts if the given repo isn't currently on branch ai-work.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ check-branch: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ check-branch: usage: check-branch --repo=<path>" >&2
+    exit 1
+fi
+
+CURRENT_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" != "ai-work" ]; then
+    echo "❌ Unexpected branch name: $CURRENT_BRANCH" >&2
+    echo "Expected: ai-work" >&2
+    echo "" >&2
+    echo "AI agents are only allowed to interact with the 'ai-work' branch." >&2
+    echo "" >&2
+    echo "To move your local commits to ai-work:" >&2
+    echo "  1. git checkout ai-work" >&2
+    echo "  2. git cherry-pick <commit-hash>  (for each commit)" >&2
+    exit 1
+fi

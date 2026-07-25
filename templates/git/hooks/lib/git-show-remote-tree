@@ -1,0 +1,40 @@
+#!/bin/bash
+# Materializes a pushed ref as plain files so it can be compared against a
+# working copy with a plain directory diff (proto-verify) instead of
+# needing git-aware comparison logic at every call site.
+set -e
+
+# git sets GIT_DIR (etc.) when invoking a hook, pointing at the invoking
+# repo's own git dir. That env var overrides `-C` on nested git commands —
+# without unsetting it, this could silently operate on the wrong repo when
+# the target repo differs from the one that invoked the hook.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        --remote=*) REMOTE="${arg#--remote=}" ;;
+        --branch=*) BRANCH="${arg#--branch=}" ;;
+        --path=*) TREE_PATH="${arg#--path=}" ;;
+        --output=*) OUTPUT_DIR="${arg#--output=}" ;;
+        *) echo "❌ git-show-remote-tree: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ] || [ -z "${REMOTE:-}" ] || [ -z "${BRANCH:-}" ] || [ -z "${TREE_PATH:-}" ] || [ -z "${OUTPUT_DIR:-}" ]; then
+    echo "❌ git-show-remote-tree: usage: git-show-remote-tree --repo=<path> --remote=<name> --branch=<name> --path=<path-in-repo> --output=<dir>" >&2
+    exit 1
+fi
+
+if [ ! -e "$REPO/.git" ]; then
+    echo "❌ git-show-remote-tree: $REPO not found" >&2
+    exit 1
+fi
+
+git -C "$REPO" fetch "$REMOTE" "$BRANCH" --quiet
+
+mkdir -p "$OUTPUT_DIR"
+git -C "$REPO" ls-tree -r --name-only "$REMOTE/$BRANCH" -- "$TREE_PATH" | while IFS= read -r file; do
+    rel="${file#"$TREE_PATH"/}"
+    mkdir -p "$OUTPUT_DIR/$(dirname "$rel")"
+    git -C "$REPO" show "$REMOTE/$BRANCH:$file" > "$OUTPUT_DIR/$rel"
+done

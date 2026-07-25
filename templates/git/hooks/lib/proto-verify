@@ -1,0 +1,38 @@
+#!/bin/bash
+# Plain directory diff, deliberately with no git in it — comparing against
+# a git ref is a two-step job (git-show-remote-tree materializes the ref
+# first), so this stays reusable for comparing any two mirrored folders.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --original=*) ORIGINAL="${arg#--original=}" ;;
+        --destination=*) DESTINATION="${arg#--destination=}" ;;
+        *) echo "❌ proto-verify: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${ORIGINAL:-}" ] || [ -z "${DESTINATION:-}" ]; then
+    echo "❌ proto-verify: usage: proto-verify --original=<dir> --destination=<dir>" >&2
+    exit 1
+fi
+
+MISMATCH=0
+while IFS= read -r -d '' f; do
+    rel="${f#./}"
+    if [ ! -f "$DESTINATION/$rel" ]; then
+        echo "❌ $rel is missing from $DESTINATION" >&2
+        MISMATCH=1
+        continue
+    fi
+    if ! diff -q "$ORIGINAL/$rel" "$DESTINATION/$rel" >/dev/null; then
+        echo "❌ $rel differs between $ORIGINAL and $DESTINATION" >&2
+        MISMATCH=1
+    fi
+done < <(cd "$ORIGINAL" && find . -name '*.proto' -print0)
+
+if [ "$MISMATCH" -eq 1 ]; then
+    echo "   Mismatch between $ORIGINAL and $DESTINATION." >&2
+    exit 1
+fi
+
+echo "✅ $ORIGINAL matches $DESTINATION"

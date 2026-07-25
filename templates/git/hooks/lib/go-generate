@@ -1,0 +1,29 @@
+#!/bin/bash
+# Regenerates and stages in one step so generated code can never be
+# committed out of sync with the source that produced it.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        --generated-dir=*) GEN_DIR="${arg#--generated-dir=}" ;;
+        *) echo "❌ go-generate: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ] || [ -z "${GEN_DIR:-}" ]; then
+    echo "❌ go-generate: usage: go-generate --repo=<path> --generated-dir=<relative>" >&2
+    exit 1
+fi
+
+if [ ! -f "$REPO/go.mod" ]; then
+    echo "❌ go-generate: no go.mod found at $REPO" >&2
+    exit 1
+fi
+
+echo "🧪 go generate ./..."
+if ! go -C "$REPO" generate ./...; then
+    echo "❌ go generate failed! Commit aborted."
+    exit 1
+fi
+
+git -C "$REPO" add "$GEN_DIR"

@@ -1,0 +1,21 @@
+#!/bin/bash
+# The baseline every repo's push should meet, factored out so it doesn't
+# get re-implemented per repo: right branch, tests pass (if any apply),
+# nothing left uncommitted that isn't expected test noise.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ pre-push-checks: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ pre-push-checks: usage: pre-push-checks --repo=<path>" >&2
+    exit 1
+fi
+LIB="$(dirname "$0")"
+
+"$LIB/check-branch" --repo="$REPO"
+"$LIB/go-test" --repo="$REPO"
+"$LIB/cassette-check" --repo="$REPO"

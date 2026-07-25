@@ -1,0 +1,45 @@
+#!/bin/bash
+# Test runs can leave behind refreshed cassette fixtures as a side effect
+# — that's expected noise, not something to block a push over, so it gets
+# committed automatically rather than making every push fail on it.
+# Anything else uncommitted is a real problem and still blocks the push.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        *) echo "❌ cassette-check: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ]; then
+    echo "❌ cassette-check: usage: cassette-check --repo=<path>" >&2
+    exit 1
+fi
+
+echo "📋 Checking for uncommitted changes..."
+UNCOMMITTED=$(git -C "$REPO" status --short)
+
+if [ -z "$UNCOMMITTED" ]; then
+    echo "✓ No uncommitted changes"
+    exit 0
+fi
+
+echo "⚠️  Found uncommitted changes:"
+echo "$UNCOMMITTED"
+echo ""
+
+CASSETTE_CHANGES=$(echo "$UNCOMMITTED" | grep -c "cassettes/" || true)
+TOTAL_CHANGES=$(echo "$UNCOMMITTED" | wc -l)
+
+if [ "$CASSETTE_CHANGES" -eq "$TOTAL_CHANGES" ] && [ "$TOTAL_CHANGES" -gt 0 ]; then
+    echo "✓ All changes are cassettes - committing automatically..."
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -m "test: update cassette timestamps from pre-push test run
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+    echo "✓ Cassettes committed"
+else
+    echo "❌ Found non-cassette uncommitted changes! Push aborted."
+    echo "Please review and commit/discard these changes manually."
+    exit 1
+fi
