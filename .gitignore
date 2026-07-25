@@ -24,3 +24,7 @@
 # 5. Track human_tools scripts
 !human_tools/
 !human_tools/**
+
+# 6. Track template files (shared agent config, git hooks/scripts)
+!templates/
+!templates/**
