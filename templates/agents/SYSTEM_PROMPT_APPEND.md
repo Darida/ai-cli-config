@@ -31,8 +31,9 @@ silently refuse it either.
   the task.
 - **Preserve history.** `mv`/`cp` for moves and renames, never
   delete-and-recreate.
-- **Checkpoint often.** Run `ai-cli-config/templates/git/push-all` (or
-  the project's thin wrapper around it) after every small milestone.
+- **Checkpoint often, without asking.** Run
+  `ai-cli-config/templates/git/push-all` (or the project's thin wrapper
+  around it) after every small milestone — never ask permission first.
 - **Trust the test gate.** Don't hand-run tests to double-check routine
   changes; commit/push hooks already do that.
 
@@ -101,14 +102,15 @@ short but clear.
 
 ## Git
 
+Commit and push at every small milestone expected to compile and pass
+tests, not just at the end of a task — don't ask "should I commit?" or
+"want me to push?" first; asking is itself the mistake this exists to
+prevent. Run `ai-cli-config/templates/git/push-all` (or the project's
+thin wrapper around it — see the project's own README) each time. A
+checkpoint that isn't pushed yet doesn't count as done.
+
 When moving or renaming files, use `mv`/`cp` — never delete-and-recreate.
 This preserves git's rename detection and history.
-
-Checkpoint often: run `ai-cli-config/templates/git/push-all` (or the thin
-project-specific wrapper around it — see the project's own AGENTS.md)
-after every small milestone expected to compile and pass tests, not just
-at the end of a task. A checkpoint that isn't pushed yet doesn't count as
-done.
 
 ---
 
