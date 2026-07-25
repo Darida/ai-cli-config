@@ -82,7 +82,23 @@ fi
 for i in "${!TO_APPROVE_PATHS[@]}"; do
     echo ""
     echo "=== Approving ${TO_APPROVE_NAMES[$i]} ==="
-    (cd "${TO_APPROVE_PATHS[$i]}" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+    repo_path="${TO_APPROVE_PATHS[$i]}"
+    (cd "$repo_path" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT")
+
+    # Approving a submodule squash-merges it and resets its ai-work branch
+    # to match the new main — moving its checked-out commit. That leaves
+    # the workspace root's recorded pointer for it stale, which
+    # approve-ai-work.sh's own "no uncommitted changes" check would then
+    # refuse to see past on the next repo. Sync it now, before that
+    # happens.
+    if [ "$repo_path" != "$WORKSPACE_ROOT" ]; then
+        submodule_name="${TO_APPROVE_NAMES[$i]}"
+        if [ -n "$(git -C "$WORKSPACE_ROOT" status --porcelain -- "$submodule_name")" ]; then
+            git -C "$WORKSPACE_ROOT" add "$submodule_name"
+            git -C "$WORKSPACE_ROOT" commit -m "chore: sync $submodule_name submodule pointer after approval"
+            git -C "$WORKSPACE_ROOT" push origin ai-work
+        fi
+    fi
 done
 
 echo ""

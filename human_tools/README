@@ -45,6 +45,12 @@ across all of them in one go instead of `cd`-ing into each one by hand.
    `approve-ai-work.sh` re-derive it itself from whatever directory
    happens to be current. Stops with a clear message if the workspace
    root has no key set.
+5. Approving a submodule squash-merges it and resets its `ai-work` to
+   match the new `main` — moving its checked-out commit. Immediately
+   after each submodule, this script commits and pushes that pointer bump
+   in the workspace root before moving on, so the workspace root's own
+   turn (and `approve-ai-work.sh`'s "no uncommitted changes" check) never
+   sees it as an unexpected dirty change.
 
 ```bash
 ./approve-all-ai-work.sh
