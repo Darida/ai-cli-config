@@ -41,12 +41,12 @@ across all of them in one go instead of `cd`-ing into each one by hand.
    run `approve-ai-work.sh` (squash-merges it and resets its `ai-work` to
    match the new `main`, moving its checked-out commit), then immediately
    commit and push the resulting submodule-pointer bump in the workspace
-   root. That means the workspace root can end up with something to
-   approve even if step 2 found nothing there — approving *any* submodule
-   guarantees the root now has at least that pointer-bump commit pending.
-   So after the loop, `approve-ai-work.sh` runs once for the workspace
-   root if either step 2 found it already had changes, or the loop above
-   gave it some.
+   root. `approve-ai-work.sh` then runs once, unconditionally, for the
+   workspace root itself — either it already had its own changes and the
+   loop above was empty (never touched it), or the loop ran and gave it
+   at least one pointer-bump commit. The step 2 check that decided
+   whether to skip it entirely already ruled out the only case where it
+   wouldn't need approving.
 5. One `gemini.apikey`, read from the workspace root's own local git
    config (`git config --local gemini.apikey '...'`, set once there) — no
    per-repo config, no fallback chain. Read once and passed in explicitly
