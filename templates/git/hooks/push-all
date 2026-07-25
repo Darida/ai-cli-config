@@ -53,17 +53,31 @@ commit_and_push() {
     # false "nothing to commit" instead of aborting the script.
     local status_output
     status_output="$(git -C "$repo" status --porcelain)"
-    if [ -z "$status_output" ]; then
+    if [ -n "$status_output" ]; then
+        echo "📝 $name: committing..."
+        git -C "$repo" add -A
+        git -C "$repo" commit -m "$COMMIT_MSG"
+    else
         echo "⏭️  $name: nothing to commit"
-        return 0
     fi
 
     local branch
     branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
 
-    echo "📝 $name: committing..."
-    git -C "$repo" add -A
-    git -C "$repo" commit -m "$COMMIT_MSG"
+    # Push independently of whether this call just committed anything —
+    # a clean working tree doesn't mean nothing needs pushing. A prior
+    # run can leave local commits stranded ahead of the remote (e.g. a
+    # pre-push hook rejecting that run's push after its commit already
+    # succeeded), and those must still go out here rather than being
+    # silently skipped because there was nothing new to commit this time.
+    if git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+        local ahead
+        ahead="$(git -C "$repo" rev-list --count "origin/$branch..HEAD")"
+        if [ "$ahead" -eq 0 ]; then
+            echo "⏭️  $name: nothing to push"
+            return 0
+        fi
+    fi
 
     echo "🚀 $name: pushing $branch..."
     git -C "$repo" push origin "$branch"
