@@ -1,0 +1,91 @@
+#!/bin/bash
+# Generic checkpoint script, shared across whatever projects use this
+# template. Takes a single input - the commit message - and discovers
+# everything else itself, via git, with no assumption about how deep this
+# repo is checked out or what it's nested inside:
+#
+#   - Workspace root: ask git. `rev-parse --show-toplevel` finds this
+#     script's own repo root regardless of how deep inside it the script
+#     lives; `rev-parse --show-superproject-working-tree` from there finds
+#     the outer repo that has it checked out as a submodule, if any - that
+#     outer repo is "the workspace". If there isn't one (this repo isn't
+#     anyone's submodule), the workspace is just this repo itself.
+#   - Which repos to commit, and in what order: the workspace's own
+#     .gitmodules, read in file order (falls back to scanning direct
+#     child directories for a .git entry if there's no .gitmodules).
+#     Declaration order in .gitmodules is what lets a project express
+#     "repo X must land before repo Y" (e.g. one repo's pre-push hook
+#     verifying against another's already-pushed state) without this
+#     script needing to know any repo names.
+#   - Branch: whatever each repo is currently checked out to. This never
+#     switches branches - the caller is assumed to already be on the
+#     right one everywhere.
+#
+# The workspace root itself is always committed/pushed last, so it picks
+# up any submodule pointer bumps the repos above it produced. Stops
+# immediately on the first real failure (e.g. a hook rejecting a push)
+# rather than continuing past it, since later repos may depend on the one
+# that just failed.
+set -euo pipefail
+
+if [ "$#" -lt 1 ] || [ -z "$1" ]; then
+    echo "❌ usage: push-all \"<commit message>\"" >&2
+    exit 1
+fi
+MESSAGE="$1"
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+CONFIG_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
+
+COMMIT_MSG="$MESSAGE
+
+Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+
+commit_and_push() {
+    local repo="$1"
+    local name="$2"
+
+    # Assignment kept on its own line, not combined with `local` - a
+    # `local x=$(cmd)` masks cmd's exit status (local's own status wins
+    # instead), which would silently turn a real git failure here into a
+    # false "nothing to commit" instead of aborting the script.
+    local status_output
+    status_output="$(git -C "$repo" status --porcelain)"
+    if [ -z "$status_output" ]; then
+        echo "⏭️  $name: nothing to commit"
+        return 0
+    fi
+
+    local branch
+    branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
+
+    echo "📝 $name: committing..."
+    git -C "$repo" add -A
+    git -C "$repo" commit -m "$COMMIT_MSG"
+
+    echo "🚀 $name: pushing $branch..."
+    git -C "$repo" push origin "$branch"
+}
+
+list_submodule_paths() {
+    if [ -f "$WORKSPACE_ROOT/.gitmodules" ]; then
+        git config --file "$WORKSPACE_ROOT/.gitmodules" --get-regexp '\.path$' | awk '{print $2}'
+    else
+        for entry in "$WORKSPACE_ROOT"/*/; do
+            repo="${entry%/}"
+            [ -e "$repo/.git" ] && basename "$repo"
+        done
+    fi
+}
+
+while IFS= read -r name; do
+    [ -z "$name" ] && continue
+    repo="$WORKSPACE_ROOT/$name"
+    [ -e "$repo/.git" ] && commit_and_push "$repo" "$name"
+done < <(list_submodule_paths)
+
+commit_and_push "$WORKSPACE_ROOT" "workspace root"
+
+echo "✅ push-all done"
