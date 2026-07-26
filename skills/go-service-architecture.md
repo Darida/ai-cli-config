@@ -5,9 +5,7 @@ A pattern for a fleet of small Go microservices sharing one repo and
 shared domain code between services. Apply this shape to a new Go
 service fleet unless the project's own README already documents a
 different, deliberate convention — don't impose this over an existing,
-working pattern. If a single deployable service is all you actually
-need, see the simpler modular-monolith version of this pattern instead;
-this doc is specifically for the microservices case.
+working pattern.
 
 ---
 
@@ -37,12 +35,10 @@ this doc is specifically for the microservices case.
   are not an edge case in a service fleet — they're routine (client
   retries, outbox dispatch retries, plain network flakiness) — so every
   write path is designed for it from the start, not bolted on later.
-- **Resource names are parsed for ownership.** Deliberately the
-  opposite of a single-database design: with each entity's owning
-  service fixed at creation, the name itself is the cheapest, always-
-  available way to route to the right service — see **Resource Names
-  and Ownership** for why this reverses the "never parse" rule a
-  single-database version of this pattern would use.
+- **Resource names are parsed for ownership.** Each entity's owning
+  service is fixed at creation, so the name itself is the cheapest,
+  always-available way to route to the right service — see **Resource
+  Names and Ownership**.
 - **A dedicated read-only composition service (BFF)** assembles
   cross-service views for a frontend — domain services stay narrow and
   never fan out to each other just to answer a read.
@@ -64,8 +60,9 @@ framework/             # the one exception to "no shared code" — see below
 services/
   <name>/
     actions/
-      <name>.go           # Server: thin orchestration, inline error-code mapping
-      <name>_test.go
+      server.go            # Server struct + NewServer(manager) constructor
+      <rpc-name>.go          # one file per RPC — e.g. get_widget.go, create_widget.go
+      <rpc-name>_test.go       # matching test file per RPC
     repository/
       <entity>/
         interface.go       # Repository interface + this package's own error sentinels
@@ -89,17 +86,15 @@ services/
     converters/
       <entity>.go         # hand-written internal <-> wire, batch/list helpers
       <entity>_fuzz_test.go
+    service.go            # wires this service's manager + Server + validators
+                           # into a mountable handler; the one thing main.go calls
     main.go               # this service's own entry point
 ```
 
-Everything under one `services/<name>/` follows the same internal
-layering as a modular monolith (`repository/` → `core/` → `actions/`),
-scoped to that one service. The difference is the outer boundary:
-nothing under `services/<name>/` ever imports from
-`services/<other-name>/`, full stop — where a modular monolith would
-let `core/order` import `core/customer` directly, a microservice's
-`services/order/core/order` instead calls `services/customer`'s
-generated gRPC client.
+Nothing under one `services/<name>/` ever imports from
+`services/<other-name>/`, full stop — the only way `services/order`
+reaches `services/customer` is `services/customer`'s generated gRPC
+client, never a direct package import.
 
 ---
 
@@ -130,9 +125,9 @@ generated gRPC client.
   the same binary. A dependency on another service is a network call in
   the code, whether or not it's a network call at runtime today.
 - Defines its own error sentinels in `interface.go`, same reasoning as
-  `repository/` — see **Error Ownership** below, which now also covers
-  errors coming back from another *service's* RPC, not just this
-  service's own repository.
+  `repository/` — see **Error Ownership** below, which covers errors
+  from a repository call, a local package call, and another *service's*
+  RPC identically.
 - A "special" or "admin-only" capability is not a dedicated service of
   its own. It's a normal capability on the domain it belongs to,
   exposed as a **private** RPC on that domain's own service — see
@@ -140,7 +135,13 @@ generated gRPC client.
 
 ## services/&lt;name&gt;/actions — Thin Orchestration Only
 
-- An action file is ~5 lines: validate (automatic, via the
+- **One file per RPC**, not one file per service — `actions/server.go`
+  holds the `Server` struct and its `NewServer(manager)` constructor;
+  every RPC method attaches to that same struct from its own file
+  (`actions/<rpc-name>.go`). A service with ten RPCs has ten small
+  method files plus `server.go`, never one large file accumulating all
+  of them.
+- Each RPC method is ~5 lines: validate (automatic, via the
   interceptor), delegate to exactly one `core/` manager call, convert
   the result to the wire type, map errors.
 - **Inline, duplicated error-code mapping per action** — no shared
@@ -150,6 +151,13 @@ generated gRPC client.
   When unsure, leave it internal.
 - Converters, validators, and the validation registry are **plain
   packages** — no `interface.go`/`impl/`/`module/` split.
+- `services/<name>/service.go` (one level up from `actions/`) is the
+  single place that assembles this service end to end: build the
+  `core/` manager via its `module.NewManager()`, construct
+  `actions.NewServer(manager)`, register this service's validators into
+  its `validation.Registry`, and return the finished, mountable handler
+  (procedure path + `http.Handler`). `main.go` calls exactly this and
+  nothing else to stand the service up.
 
 ---
 
@@ -177,7 +185,7 @@ actually protects against. Concretely:
 ## Error Ownership (read this before writing a return statement)
 
 **No interface propagates a dependency's error identity — whether that
-dependency is a local repository, a local package, or now a *remote
+dependency is a local repository, a local package, or a *remote
 service's RPC*.** A caller of `services/order/core/order.Manager`
 should never need to inspect `services/customer`'s error types to
 understand what it might get back — remote or local, the rule is the
@@ -218,9 +226,9 @@ internal is always a safe default.**
 
 ## interface.go / impl/ / module/ Split
 
-Unchanged from the modular-monolith version of this pattern, just
-nested one level deeper — under `services/<name>/core/<domain>/` and
-`services/<name>/repository/<entity>/` instead of at the repo root:
+Every `core/` and `repository/` package, nested under
+`services/<name>/core/<domain>/` or `services/<name>/repository/<entity>/`,
+follows the same three-way split:
 
 - **`interface.go`** — the exported interface type and this package's
   own error sentinels. Imports nothing from `impl/` or `module/`.
@@ -255,18 +263,13 @@ nested one level deeper — under `services/<name>/core/<domain>/` and
 ## Resource Names and Ownership
 
 **Resource names are parsed to determine which service owns a
-resource** — the opposite of a single-database design's "never parse"
-rule, and worth stating that reversal explicitly so it doesn't read as
-an oversight. The single-database version of this rule exists to avoid
-staleness: a reverse-ownership index living in one shared database can
-go stale relative to the data it indexes, so that design prefers a
-repository-maintained index over parsing. None of that applies once
-each entity's owning *service* is fixed at creation and never changes
-without an explicit transfer operation — the name itself
+resource.** Each entity's owning service is fixed at creation and never
+changes without an explicit transfer operation, so the name itself
 (`accounts/{a}/orders/{o}`) already encodes routing information that's
-permanently true, so parsing it costs nothing and avoids adding a
-network hop (or a shared ownership index, which would itself violate
-no-shared-tables) just to answer "which service do I ask about this."
+permanently true — parsing it costs nothing, and it avoids both an
+extra network hop and a shared ownership index (which would itself
+violate no-shared-tables) just to answer "which service do I ask about
+this."
 
 If ownership can ever change after creation, that's an explicit
 `Transfer` RPC on the owning service — never an implicit list update
@@ -276,11 +279,10 @@ somewhere else.
 
 ## Cross-Service Consistency (No Distributed Transactions)
 
-There is no cross-service database transaction. A flow that used to be
-two writes in one local transaction (debit a balance, create a
-resource) is now two writes to two different services' own databases,
-and a crash between them is a real possibility that has to be designed
-for, not assumed away.
+There is no cross-service database transaction. A flow spanning two
+services — e.g. debit a balance, then create a resource — writes to two
+different services' own databases, and a crash between those two writes
+is a real possibility that has to be designed for, not assumed away.
 
 **For hard preconditions** (can this proceed at all — e.g. can they
 afford it): use a synchronous **Try-Confirm-Cancel** call to whichever
@@ -413,8 +415,7 @@ composition service only for assembled reads.
 ## Testing
 
 - **A service's own dependencies** (its own `repository/`, its own
-  `core/`) are tested for real, through `module.NewXXX()` — no mocks,
-  same as the modular-monolith version of this pattern.
+  `core/`) are tested for real, through `module.NewXXX()` — no mocks.
 - **Another service's dependency** is the one place mocking the
   generated gRPC client is the right call, not a compromise: it's a
   stable, deliberately-versioned wire contract that changes rarely and
