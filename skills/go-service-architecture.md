@@ -39,6 +39,11 @@ working pattern.
   service is fixed at creation, so the name itself is the cheapest,
   always-available way to route to the right service — see **Resource
   Names and Ownership**.
+- **`repository/`/`core/` default to using the `v1` wire proto
+  directly** — no internal proto namespace, no converters — unless a
+  service's needs genuinely diverge from the wire shape, in which case
+  moving to an internal-proto-plus-`converters/` pattern requires
+  explicit human approval; see **Repository/Core Data Shape**.
 - **A dedicated read-only composition service (BFF)** assembles
   cross-service views for a frontend — domain services stay narrow and
   never fan out to each other just to answer a read.
@@ -100,8 +105,10 @@ services/
     validation/
       XxxRequestValidator.go   # registered into a framework/validation.Registry
       XxxEntityValidator.go    # from this service's own service.go — see framework/ above
-    converters/
-      <entity>.go         # hand-written internal <-> wire, batch/list helpers
+    converters/           # ONLY if this service is on the internal-proto pattern —
+                           # see Repository/Core Data Shape below. Absent entirely
+                           # for a service on the (default) v1-direct pattern.
+      <entity>.go         # hand-written internal <-> v1, batch/list helpers
       <entity>_fuzz_test.go
     service.go            # wires this service's manager + Server + validators
                            # into a mountable handler; the one thing main.go calls
@@ -128,8 +135,11 @@ client, never a direct package import.
   its own domain, plus small storage-free helper engines it doesn't
   share with any other service) — `repository/` has no equivalent
   reason to split.
-- Accepts and returns **protos or basic Go types only** — never a
-  custom Go struct.
+- Accepts and returns **protos (v1 or internal — see Repository/Core
+  Data Shape below) or basic Go types only, in `interface.go`'s method
+  signatures** — never a custom Go struct there. (A private Go struct
+  used only inside `impl/`, never crossing `interface.go`, is a
+  different matter — see the same section.)
 - Verbs: `Get`, `Create`, `Update`, `Delete`, narrow `Add`/`Remove`
   patch-style mutators, `Find`-style lookups. No business logic.
 - Every method takes `ctx context.Context` — genuinely used here, not
@@ -144,8 +154,10 @@ client, never a direct package import.
 
 ## services/&lt;name&gt;/core — All Business Logic
 
-- Operates exclusively on this service's own internal proto entities.
-  The public wire API's types are not imported anywhere under `core/`.
+- Operates on whichever proto this service has chosen as its
+  `repository/`/`core/` data shape — `v1` directly, or a separate
+  internal proto — see **Repository/Core Data Shape** below. Under the
+  internal-proto pattern, `v1` is not imported anywhere under `core/`.
 - Every cost formula, precondition check, and business rule lives here.
 - When this domain needs something another *service* owns, it calls
   that service's generated gRPC client — never that service's Go
@@ -160,6 +172,67 @@ client, never a direct package import.
   its own. It's a normal capability on the domain it belongs to,
   exposed as a **private** RPC on that domain's own service — see
   **Private vs. Public RPC Visibility**.
+
+## Repository/Core Data Shape: v1-Direct vs. Internal+Converters
+
+Two patterns are acceptable for what `repository/` and `core/` use as
+their own input/output types. **Pick one per service and never mix them
+within that service** — every `repository/`/`core/` method in a given
+service uses the same pattern, not a mix of `v1` here and internal
+there.
+
+- **Pattern 1 — v1-direct (the default; start here).** `repository/`
+  and `core/` accept and return the same `v1` wire protos (plus basic
+  Go types) that `actions/` sends over the network. There is no
+  separate internal proto namespace, no `converters/` package, and
+  nothing to keep in sync between two shapes — because there's only
+  one shape.
+- **Pattern 2 — internal protos + converters (a deliberate escape
+  hatch, not a starting point).** `repository/` and `core/` accept and
+  return a separate, service-scoped internal proto (plus basic Go
+  types) instead. Under this pattern, **`actions/` is the only package
+  in the service that ever references the `v1` type**, and it must
+  immediately convert — via a hand-written `services/<name>/converters/`
+  package — before a value crosses into `core/`, and again on the way
+  back out to the wire. Neither `repository/` nor `core/` imports `v1`
+  under this pattern.
+
+**How to choose, and how to move between them:**
+
+1. Design the `v1` wire proto as an API — shaped for what a client
+   actually needs, without regard to how it will be stored or computed
+   internally.
+2. Default to Pattern 1: use `v1` directly in `repository/`/`core/` as
+   long as that shape also works fine for storage and business logic.
+   **Never reshape `v1` to suit an implementation convenience** — the
+   wire contract is driven by the API it serves, not the other way
+   around.
+3. If `v1`'s shape genuinely stops working for internal needs, that's
+   a real architectural change, not a routine refactor: **get explicit
+   human approval first**, then migrate — introduce this service's own
+   internal proto, move every `repository/`/`core/` usage over to it,
+   and add `services/<name>/converters/` to bridge `actions/` between
+   the two. Don't reach for Pattern 2 preemptively "just in case a
+   field diverges later."
+
+**Custom Go structs are still never allowed to cross an `interface.go`
+boundary**, in either pattern — that rule (see **repository — Dumb
+Storage** above) is about the interface, not about which proto
+namespace is in play. A private Go struct used only *inside* an
+`impl/` package is a different matter entirely and is completely fine,
+as long as it:
+- never appears in an `interface.go` method signature (parameter or
+  return value), and
+- never escapes the package (no exported field, no exported
+  constructor returning it).
+
+`services/bank/repository/impl/store.go`'s own `hold`/`holdStatus`
+types are the model for this: real, private Go structs holding
+bookkeeping (`status`, `expiresAt`) that never needs to cross
+`Repository`'s interface — only a plain `hold_id` string does. That's
+what keeps "protos or basic types only" satisfied at the boundary that
+actually matters, while still allowing normal, idiomatic private Go
+code inside an implementation.
 
 ## services/&lt;name&gt;/actions — Thin Orchestration Only
 
@@ -177,12 +250,18 @@ client, never a direct package import.
   Only map the specific sentinel errors this action actually expects;
   everything else falls through to the generic internal-error code.
   When unsure, leave it internal.
-- Converters and this service's own `XxxRequestValidator` types are
-  **plain packages** — no `interface.go`/`impl/`/`module/` split. The
-  generic `Registry`/`Interceptor` machinery they get registered into
-  lives in `framework/validation` (see **framework/** above) — a
-  service's own `validation/` package holds only its validator types,
-  never a copy of the registry itself.
+- If this service is on the internal-proto pattern (see
+  **Repository/Core Data Shape** above), `actions/` is the only package
+  that references `v1`, and `converters/` — a **plain package**, no
+  `interface.go`/`impl/`/`module/` split — is where the internal↔v1
+  translation actually happens. On the default v1-direct pattern,
+  there's no `converters/` package at all.
+- This service's own `XxxRequestValidator` types are likewise a **plain
+  package** — no `interface.go`/`impl/`/`module/` split. The generic
+  `Registry`/`Interceptor` machinery they get registered into lives in
+  `framework/validation` (see **framework/** above) — a service's own
+  `validation/` package holds only its validator types, never a copy of
+  the registry itself.
 - `services/<name>/service.go` (one level up from `actions/`) is the
   single place that assembles this service end to end: build the
   `core/` manager via its `module.NewManager()`, construct
@@ -297,10 +376,13 @@ follows the same three-way split:
 - Each deployable service corresponds to one (or more) proto service
   definitions. Splitting a service later means splitting its proto
   too — the two boundaries move together.
-- An internal-only proto namespace, scoped per service, holds whatever
-  that service's own `repository/`/`core/` operate on internally; the
-  public wire namespace is what every service's `actions/` layer
-  speaks, both to its own clients and to other services calling it.
+- The public `v1` wire namespace is what every service's `actions/`
+  layer speaks, both to its own clients and to other services calling
+  it. A service on the internal-proto pattern (see **Repository/Core
+  Data Shape** above) additionally has its own internal-only proto
+  namespace that its `repository/`/`core/` operate on instead — but
+  that's a deliberate, human-approved exception per service, not the
+  default for every service.
 
 ---
 
