@@ -55,7 +55,13 @@ proto/                # every service's proto, at repo root — not nested
 
 framework/             # the one exception to "no shared code" — see below
   idempotency/
-    idempotency.go       # Store interface, Key, Outcome, interceptor
+    idempotency.go       # Store interface, Key, Outcome, ClaimResult
+    interceptor.go        # the Connect interceptor itself
+    impl/
+      memory_store.go      # a concrete Store — impl/ still applies here,
+                            # same as core/ and repository/, whenever a
+                            # framework/ package has a concrete
+                            # implementation behind its interface
 
 services/
   <name>/
