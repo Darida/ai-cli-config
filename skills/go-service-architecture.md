@@ -313,6 +313,18 @@ should never need to inspect `services/customer`'s error types to
 understand what it might get back — remote or local, the rule is the
 same.
 
+Use `github.com/cockroachdb/errors` (aliased as `errors`, a drop-in for
+the stdlib package — `errors.Is`/`errors.As` still work exactly the
+same) instead of `fmt.Errorf`/stdlib `errors` in every `repository/impl`
+and `core/*/impl` file, purely so every wrap captures a real stack frame
+for free — nothing else about the call-site shape changes. **Never use
+`errors.Mark` for this** — it's tempting for case 1 below since it looks
+like it preserves both the new sentinel's identity and the original
+error's stack, but it only satisfies *cockroachdb's own* `errors.Is`,
+not stdlib's plain `Unwrap()`-walking one — and every `actions/*.go`
+error-code mapping (see below) uses stdlib `errors.Is`. `errors.Wrapf`
+(below) satisfies both.
+
 Two cases, decided at the call site where a dependency's error comes
 back (a repository call, a local package call, or a gRPC call to
 another service — treat all three identically):
@@ -323,7 +335,7 @@ another service — treat all three identically):
    ```go
    o, err := m.orders.Get(ctx, orderID)
    if err != nil {
-       return nil, fmt.Errorf("%w: %v", order.ErrNotFound, err)
+       return nil, errors.Wrapf(order.ErrNotFound, "%v", err)
    }
    ```
    The same applies when the dependency is a remote RPC — translate a
@@ -331,18 +343,39 @@ another service — treat all three identically):
    package's own `ErrNotFound` exactly the same way you'd translate a
    local repository's error.
 2. **Internal invariant violation** — a lookup on something the caller
-   never directly named. Wrap with `%v` only, no `%w`, no exported
-   sentinel — deliberately breaking the chain so nothing upstream can
-   match it to anything but the generic internal-error code:
+   never directly named. Wrap the dependency's error as the cause, no
+   exported sentinel — deliberately breaking the chain so nothing
+   upstream can match it to anything but the generic internal-error
+   code:
    ```go
    owner, err := m.customers.FindOwner(ctx, orderID) // order already confirmed to exist
    if err != nil {
-       return fmt.Errorf("order: owner of order %q: %v", orderID, err)
+       return errors.Wrapf(err, "order: owner of order %q", orderID)
    }
    ```
 
 **When genuinely unsure which case applies, treat it as case 2 —
 internal is always a safe default.**
+
+**None of this internal chain ever reaches a normal caller directly.**
+`actions/` never passes a `core/` error straight to `connect.NewError` —
+every mapped case (and the generic fallback) builds a
+`framework/debugtrace.CallerError{Message, Debug}` instead: `Message` is
+the exact, complete string a normal caller sees, hand-written at the
+call site, never derived from the internal chain; `Debug` is that full
+internal error (sentinel identity plus every wrap's real stack frame).
+`debugtrace.ServerInterceptor`, installed as the *outermost* interceptor
+in `connect.WithInterceptors(...)` (first in the list — see **Idempotency**
+below for why order matters), turns that into the final response: just
+`Message` normally, plus the complete, unredacted `Debug` chain (via
+`%+v`) on a response header when the request carried a shared debug
+token — the same shared-secret-header idiom as **Private vs. Public RPC
+Visibility** below, gating "show internal debug detail" instead of
+"allow this private RPC." A validation- or idempotency-interceptor error
+(already a direct, safe `connect.Error` of its own) passes through this
+untouched — only a `CallerError` gets the `Message`/`Debug` split, and
+only a genuinely unmapped error (not a `connect.Error` at all) falls
+back to a generic internal message.
 
 ---
 
