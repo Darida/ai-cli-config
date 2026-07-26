@@ -62,6 +62,14 @@ framework/             # the one exception to "no shared code" — see below
                             # same as core/ and repository/, whenever a
                             # framework/ package has a concrete
                             # implementation behind its interface
+  validation/
+    registry.go          # generic Registry + Validator interface + interceptor
+  randomid/
+    interface.go         # Generator interface
+    impl/
+      generator.go
+    module/
+      module.go
 
 services/
   <name>/
@@ -90,9 +98,8 @@ services/
           module.go
         <domain>_test.go
     validation/
-      registry.go         # generic Registry + interceptor
-      XxxRequestValidator.go
-      XxxEntityValidator.go
+      XxxRequestValidator.go   # registered into a framework/validation.Registry
+      XxxEntityValidator.go    # from this service's own service.go — see framework/ above
     converters/
       <entity>.go         # hand-written internal <-> wire, batch/list helpers
       <entity>_fuzz_test.go
@@ -170,15 +177,19 @@ client, never a direct package import.
   Only map the specific sentinel errors this action actually expects;
   everything else falls through to the generic internal-error code.
   When unsure, leave it internal.
-- Converters, validators, and the validation registry are **plain
-  packages** — no `interface.go`/`impl/`/`module/` split.
+- Converters and this service's own `XxxRequestValidator` types are
+  **plain packages** — no `interface.go`/`impl/`/`module/` split. The
+  generic `Registry`/`Interceptor` machinery they get registered into
+  lives in `framework/validation` (see **framework/** above) — a
+  service's own `validation/` package holds only its validator types,
+  never a copy of the registry itself.
 - `services/<name>/service.go` (one level up from `actions/`) is the
   single place that assembles this service end to end: build the
   `core/` manager via its `module.NewManager()`, construct
   `actions.NewServer(manager)`, register this service's validators into
-  its `validation.Registry`, and return the finished, mountable handler
-  (procedure path + `http.Handler`). `main.go` calls exactly this and
-  nothing else to stand the service up.
+  a `framework/validation.Registry`, and return the finished, mountable
+  handler (procedure path + `http.Handler`). `main.go` calls exactly
+  this and nothing else to stand the service up.
 
 ---
 
@@ -193,13 +204,24 @@ two services' *business logic*, the thing the no-shared-code rule
 actually protects against. Concretely:
 
 - `framework/idempotency/` — see **Idempotency** below.
+- `framework/validation/` — the generic `Registry`/`Validator`/
+  `Interceptor` machinery described in **actions — Thin Orchestration
+  Only** below. It only knows about a request's concrete Go type, never
+  what that request means — each service still writes and owns its own
+  `XxxRequestValidator` types in its own `services/<name>/validation`
+  package; only the registry/interceptor plumbing is shared.
+- `framework/randomid/` — mints a random opaque ID segment for a new
+  resource name. Zero domain knowledge: it doesn't know whether the
+  caller is about to name a creature, an order, or an idempotency key
+  for an outgoing call — just "give me a random string."
 - Anything added later here (structured logging helpers, a tracing
   interceptor, a generic retry-with-backoff helper) needs to pass the
   same test: does it know anything about *this project's domain*? If
   yes, it doesn't belong in `framework/` — it belongs under whichever
   service actually owns that knowledge, duplicated per-service if more
   than one needs it (see the **duplication over sharing** stance
-  throughout this doc — validators, error sentinels, and now this).
+  throughout this doc — validators, error sentinels, and business
+  logic in general).
 
 ---
 
