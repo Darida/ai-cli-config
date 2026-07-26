@@ -70,13 +70,17 @@ services/
       <rpc-name>.go          # one file per RPC — e.g. get_widget.go, create_widget.go
       <rpc-name>_test.go       # matching test file per RPC
     repository/
-      <entity>/
-        interface.go       # Repository interface + this package's own error sentinels
-        impl/
-          store.go          # implementation; imports parent for errors
-        module/
-          module.go          # NewXXXRepository() lazy singleton
-        <entity>_test.go
+      interface.go        # Repository interface(s) + this package's own error sentinels —
+                           # flat, not nested under a same-named subfolder: a service has
+                           # exactly one repository package. If it owns several distinct
+                           # entities, their interfaces (XxxRepository, YyyRepository) share
+                           # this one interface.go and this one `repository` package —
+                           # never a subfolder per entity.
+      impl/
+        store.go           # implementation; imports parent for errors
+      module/
+        module.go           # NewXXXRepository() lazy singleton
+      <entity>_test.go
     core/
       <domain>/
         interface.go       # Manager interface + this package's own error sentinels
@@ -106,6 +110,17 @@ client, never a direct package import.
 
 ## services/&lt;name&gt;/repository — Dumb Storage
 
+- **Flat, one package per service** — `services/<name>/repository/`
+  directly, never nested under a same-named subfolder
+  (`repository/<name>/`). A service has exactly one repository package,
+  even when it owns several distinct entities: their interfaces
+  (`XxxRepository`, `YyyRepository`) all live together in that one
+  `interface.go`, in that one `repository` package. This is unlike
+  `core/`, which is genuinely nested per domain because a service
+  commonly hosts several independent core packages (business logic for
+  its own domain, plus small storage-free helper engines it doesn't
+  share with any other service) — `repository/` has no equivalent
+  reason to split.
 - Accepts and returns **protos or basic Go types only** — never a
   custom Go struct.
 - Verbs: `Get`, `Create`, `Update`, `Delete`, narrow `Add`/`Remove`
@@ -232,8 +247,9 @@ internal is always a safe default.**
 
 ## interface.go / impl/ / module/ Split
 
-Every `core/` and `repository/` package, nested under
-`services/<name>/core/<domain>/` or `services/<name>/repository/<entity>/`,
+Every `core/` package (nested under `services/<name>/core/<domain>/`,
+since a service commonly hosts several) and this service's one
+`repository/` package (flat, directly under `services/<name>/repository/`)
 follows the same three-way split:
 
 - **`interface.go`** — the exported interface type and this package's
