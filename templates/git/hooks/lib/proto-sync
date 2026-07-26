@@ -48,13 +48,24 @@ fi
 mkdir -p "$DEST"
 (cd "$SOURCE_DIR" && find . -name '*.proto' -exec cp --parents {} "$DEST/" \;)
 
+# The copy above is additive only - a file renamed or deleted upstream
+# would otherwise linger in $DEST forever. Remove any .proto file present
+# in $DEST but no longer at that same relative path in $SOURCE_DIR, then
+# prune any directory that removal left empty.
+while IFS= read -r rel; do
+    if [ ! -f "$SOURCE_DIR/$rel" ]; then
+        rm -f "$DEST/$rel"
+    fi
+done < <(cd "$DEST" && find . -name '*.proto')
+find "$DEST" -type d -empty -delete
+
 CHANGES=$(git -C "$DEST" status --porcelain .)
 if [ -z "$CHANGES" ]; then
     echo "✓ $DEST is up to date"
     exit 0
 fi
 
-git -C "$DEST" add .
+git -C "$DEST" add -A .
 
 if [ -n "${STAGE_ONLY:-}" ]; then
     echo "📄 synced *.proto from $SOURCE_DIR into $DEST and staged into the in-progress commit"
