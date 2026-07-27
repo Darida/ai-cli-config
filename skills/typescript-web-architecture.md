@@ -37,6 +37,10 @@ solving a problem this kind of project doesn't have.
   global refresh after every one of them. See **Mutation Detection**
   below — this is what removes the need for a dedicated
   orchestration/`actions/` layer entirely.
+- **No shared client-state singleton.** There's no `state.ts` and no
+  app-wide cache — every component/view that displays backend data
+  fetches it itself, every time it renders. See **No Shared State**
+  below.
 - **Whoever directly renders an interactive element owns wiring its
   behavior**, no matter how deep it is — a component with its own
   button wires that button itself; nothing "reaches down" from a
@@ -61,12 +65,6 @@ src/
                         # the refresh-poll interval. No rendering logic, no
                         # RPC calls of its own, and no client-state
                         # knowledge — see **Mutation Detection** below.
-  state.ts              # the shared, mutable client-state singleton — the
-                         # one thing with no backend equivalent (backend
-                         # services are stateless/request-triggered; a
-                         # browser client is not, so this file's existence
-                         # is a genuine, accepted difference, not an
-                         # oversight).
   clients/
     <name>/client.ts    # a factory that builds a generated-client instance
                          # for a given service descriptor, using a caller-
@@ -91,12 +89,14 @@ src/
     refresh-on-mutation-interceptor.ts   # see **Mutation Detection**.
   components/
     <domain>/
-      <name>.ts             # a UI piece + its own event wiring
+      <name>.ts             # a UI piece + its own event wiring; owns and
+                             # fetches whatever data it displays — see
+                             # **No Shared State** below.
       <name>.module.css      # co-located, scoped styles — see **CSS**.
   views/
     <screen-name>.ts        # one file per screen/tab — assembles
-                             # components, reads `state` to render,
-                             # nothing else.
+                             # components, fetches whatever data the
+                             # screen itself needs, nothing else.
     <screen-name>.module.css
   gen/                  # protoc output — regenerated and committed by
                          # the pre-commit/pre-push git hooks (mirrors
@@ -142,12 +142,60 @@ this," never "which proto message produced this value."
 
 ## views/ — One File Per Screen
 
-A view assembles components and reads `state` to decide what to
-render. It does not own business logic, does not call the generated
-client directly for anything a component beneath it could own instead,
-and — per **Event Wiring** below — only wires behavior for elements it
-renders *directly itself*, not for anything a child component already
-owns.
+A view assembles components and fetches whatever data it needs to
+decide what to render (see **No Shared State** below). It does not own
+business logic, does not call the generated client directly for
+anything a component beneath it could own instead, and — per **Event
+Wiring** below — only wires behavior for elements it renders *directly
+itself*, not for anything a child component already owns.
+
+## No Shared State — Every Component Fetches What It Displays
+
+There is no `state.ts`, no app-wide cache, no singleton object holding
+"the current player" or "the current creature list." Each
+component/view that renders backend-derived data fetches it itself,
+every time it renders — including two components that happen to show
+the same underlying data today (e.g. both `views/collection-view.ts`
+and `views/lab-view.ts` independently call
+`RenderService.ListCreaturesView`, rather than sharing one fetch). This
+is a deliberate simplicity trade against a small amount of duplicated
+network traffic — acceptable per **Mutation Detection**'s "extra reads
+are cheap" reasoning, since this is a debug console, not a
+latency-sensitive product. An earlier draft of this pattern used a
+`state.ts` singleton (a legitimate default for a stateful browser
+client); it was rejected specifically to keep every component provably
+self-contained, even at the cost of some duplicated fetches.
+
+Three narrow, deliberate exceptions, each following the same rule as
+**components/**'s own domain-identity test — a component that is
+itself the sole owner/renderer of a piece of data may expose read
+access to it, the same way `components/creature/creature-card.ts`
+exports `shortName` for `components/nest/nest-card.ts` to reuse:
+
+- **Connection config** (`backendUrl`, `playerId`) is owned by
+  `components/debug-panel/connection-controls.ts` — the only place
+  either is ever edited, persisted to `localStorage`. It exports
+  `getBackendUrl()` / `getPlayerId()` / `getPlayerName()`; anything
+  needing to call the generated client or format a resource name
+  imports these rather than re-deriving connection state itself.
+- **The activity log** is owned by
+  `components/debug-panel/activity-log.ts`, which holds the log
+  entries as local module state and exports `logInfo()` / `logError()`
+  — any component that performs an action calls these directly after
+  it succeeds/fails, the same way it calls the generated client
+  directly (see **Mutation Detection**'s code sample).
+- **Refresh signalling** (not app data — a pub/sub mechanism) still
+  flows through the one `EventBus<void>` created in `main.ts` — see
+  **Mutation Detection**. `views/game-view.ts` is the only thing that
+  subscribes to it; every other component/view that shows live data
+  gets refreshed because `game-view.ts` re-invokes its own render
+  function, not because it independently subscribed to anything.
+
+Everything else — a screen's own nav state (e.g. `game-view.ts`'s
+"which building is currently open"), a fetched creature/nest list used
+to build one screen — lives as an ordinary local variable inside the
+file that uses it, and goes away when that file's render function
+returns or is next called.
 
 ## CSS — Co-located, Scoped, No New Dependency
 
@@ -235,12 +283,13 @@ for a CLI that does far more than this project needs from it.
 `createConnectTransport({ baseUrl })` bakes the backend URL in at
 construction time — and this app's backend URL is a runtime-editable
 text field, not a build-time constant. The factory takes `backendUrl`
-as an explicit parameter rather than reading `state.backendUrl`
-itself, so this file has no dependency on `state` at all; whoever calls
-it (a view, a component) passes the current value in, and rebuilds the
-transport fresh on each call so editing that field takes effect
-immediately without a page reload. This is cheap enough not to matter
-for a debug client; revisit only if profiling ever shows otherwise.
+as an explicit parameter rather than reaching for it itself, so this
+file has no dependency on where that value lives; whoever calls it (a
+view, a component) passes `connection-controls.ts`'s current
+`getBackendUrl()` in, and rebuilds the transport fresh on each call so
+editing that field takes effect immediately without a page reload.
+This is cheap enough not to matter for a debug client; revisit only if
+profiling ever shows otherwise.
 
 ## Mutation Detection — Why There's No `actions/` Layer
 
@@ -260,13 +309,13 @@ const isMutating = "requestId" in req.method.input.field;
 any call where it's true succeeds — emits on a generic `EventBus<void>`
 (`framework/event-bus.ts`) rather than calling a refresh function
 directly. The interceptor doesn't know what "refresh" means or who's
-listening, only that a mutation happened; whatever owns rendering
-(currently `views/deprecated_view.ts`'s `mount()`) subscribes to that
-same bus and runs its own local refresh-and-rerender in response. The
-same bus is also what `main.ts`'s poll interval emits on, so a periodic
-tick and an actual mutation are indistinguishable to the subscriber —
-one `EventBus<void>` covers "something might have changed" from either
-source. This is deliberately not surgical about *which* views are
+listening, only that a mutation happened; `views/game-view.ts` is the
+sole subscriber (see **No Shared State** below) and re-renders itself
+— its HUD and whichever building screen is currently open — in
+response. The same bus is also what `main.ts`'s poll interval emits on,
+so a periodic tick and an actual mutation are indistinguishable to the
+subscriber — one `EventBus<void>` covers "something might have changed"
+from either source. This is deliberately not surgical about *which* views are
 affected by a given mutation: computing that requires
 the frontend to model every possible backend side effect of every
 mutation (a real, previously-hit failure mode — see e.g.
@@ -289,22 +338,13 @@ the button that triggered it:
 
 ```ts
 discardBtn.addEventListener("click", () => guarded(async () => {
-  const resp = await client(CreatureService, state.backendUrl).discardCreature({ name: creature.name });
+  const resp = await client(CreatureService, getBackendUrl()).discardCreature({
+    name: creature.name,
+    requestId: crypto.randomUUID(),
+  });
   logInfo(`Discarded ${creature.name}`);
 }, logError));
 ```
-
-**Migration note:** a codebase mid-migration off a hand-written,
-per-RPC wrapper client (like this project's old `api.ts`) does not need
-a transitional `actions/` folder — that would be new structure serving
-code that's about to be deleted anyway. Instead, keep the old rendering
-code as a single, deliberately-unsplit file (e.g.
-`views/deprecated_view.ts`) with every former handler inlined as a
-local function, wired to the generated client and the new event bus.
-That's a staging step, not a deviation from this pattern: once the real
-redesign lands, this file is deleted wholesale, not incrementally
-refactored into `components/` — so it isn't worth giving it real
-internal structure in the meantime.
 
 ## Event Wiring — Whoever Renders It Owns It
 
