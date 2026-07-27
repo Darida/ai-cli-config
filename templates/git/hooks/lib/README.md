@@ -23,6 +23,14 @@ up.
   regenerates and auto-commits if that changed the generated dir. Run
   this *before* `go-test`, not after — otherwise tests can run against
   stale generated code whenever pre-commit's own regen step was bypassed.
+- `npm-generate --repo= --script= --generated-dir=` — skips if no
+  `package.json`; runs `npm run <script>` and auto-commits if that
+  changed the generated dir. Same reasoning as `go-generate`, for a repo
+  whose codegen is an npm script instead of `go generate` (e.g.
+  `web-ui`'s `protoc`-based client generation) — run it *before*
+  `npm-test`, same ordering reason as `go-generate`/`go-test`. If the
+  generator reads from another synced directory (e.g. `proto/`), run
+  the sync step first so generation sees current input.
 - `cassette-check --repo=` — auto-commits cassette-path changes
   specifically, logs (never blocks) if other changes remain
 - `proto-sync --dest= --source=` — copies then auto-commits if that
