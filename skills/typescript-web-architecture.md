@@ -230,14 +230,17 @@ invokes the one plugin directly via `--plugin=`, no Buf module config
 this is the entire reason to prefer it — ~2.7 MB total versus 126 MB
 for a CLI that does far more than this project needs from it.
 
-**The generated client is built by a factory (`client.ts`), not a
-module-level singleton**, because `createConnectTransport({ baseUrl })`
-bakes the backend URL in at construction time — and this app's backend
-URL is a runtime-editable text field, not a build-time constant. A
-factory rebuilds the transport from the current `state.backendUrl` on
-each call, so editing that field takes effect immediately without a
-page reload. This is cheap enough not to matter for a debug client;
-revisit only if profiling ever shows otherwise.
+**The generated client is built by a factory
+(`clients/<name>/client.ts`), not a module-level singleton**, because
+`createConnectTransport({ baseUrl })` bakes the backend URL in at
+construction time — and this app's backend URL is a runtime-editable
+text field, not a build-time constant. The factory takes `backendUrl`
+as an explicit parameter rather than reading `state.backendUrl`
+itself, so this file has no dependency on `state` at all; whoever calls
+it (a view, a component) passes the current value in, and rebuilds the
+transport fresh on each call so editing that field takes effect
+immediately without a page reload. This is cheap enough not to matter
+for a debug client; revisit only if profiling ever shows otherwise.
 
 ## Mutation Detection — Why There's No `actions/` Layer
 
