@@ -76,6 +76,20 @@ framework/             # the one exception to "no shared code" — see below
     module/
       module.go
 
+clients/               # one package per service *depended on*, shared by
+                        # every service that calls it — e.g. clients/bank/
+                        # for BankService. Not "no shared code" either: like
+                        # framework/, it carries no business logic, just a
+                        # generated-client wrapper plus its test double. See
+                        # **Testing** below for why this exists and what
+                        # belongs here vs. in the depending service's own
+                        # core/<domain>/interface.go.
+  <dependency-name>/
+    module.go            # Client (real) + FakeClient (test double) +
+                          # NewClient/NewForTesting/Reset — flat, no impl/
+                          # or interface/ split, since there's exactly one
+                          # real implementation and one fake, both trivial
+
 services/
   <name>/
     actions/
@@ -92,7 +106,9 @@ services/
       impl/
         store.go           # implementation; imports parent for errors
       module/
-        module.go           # NewXXXRepository() lazy singleton
+        module.go           # NewXXXRepositoryForTesting() + NewFirestoreXXXRepository()
+                             # (or whatever the real backing store is) — see
+                             # **interface.go / impl/ / module/ Split** below
       <entity>_test.go
     core/
       <domain>/
@@ -391,11 +407,25 @@ follows the same three-way split:
 - **`impl/`** — implements the interface, imports the parent package
   for its error sentinels and interface type.
 - **`module/`** — its own subpackage (avoids the import cycle `impl`
-  importing its parent would otherwise create with a DI constructor),
-  exporting `NewXXX()` memoized with `sync.Once`.
+  importing its parent would otherwise create with a DI constructor).
+  Every backing store this package could have gets its own memoized
+  (`sync.Once`) constructor here — for a `repository/`, that means
+  `NewXXXRepositoryForTesting()` (in-memory) alongside
+  `NewFirestoreXXXRepository()` (or whatever the real store is); for a
+  `core/<domain>/`, `NewManagerForTesting()` alongside
+  `NewFirestoreManager()`. In-memory storage is never a production
+  behavior, so it's always the `ForTesting` one, never the bare name —
+  that's not a naming nicety, it's what makes it true at a glance which
+  constructor is safe to call from where. Every constructor here is a
+  lazy singleton, testing ones included (see **Testing** below for why,
+  and for `Reset()`, the other required export).
 - Tests live next to `interface.go`, use real in-memory implementations
-  via `module.NewXXX()` for **this service's own** dependencies — never
-  mocks for those. A dependency on *another service* is the one place
+  via `module.NewXXXForTesting()` for **this service's own**
+  dependencies — never mocks for those, and never construct the
+  interface's implementation any other way (no local
+  `impl.NewManager(...)` call, no hand-rolled fake structs in a
+  `_test.go` file — see **Testing** for what replaces both). A
+  dependency on *another service* is the one place
   mocking is the right call — see **Testing**.
 
 ---
@@ -574,12 +604,60 @@ composition service only for assembled reads.
 ## Testing
 
 - **A service's own dependencies** (its own `repository/`, its own
-  `core/`) are tested for real, through `module.NewXXX()` — no mocks.
+  `core/`) are tested for real, through `module.NewXXXForTesting()` —
+  no mocks. Always construct through `module/`, never any other way —
+  see below for what that rules out.
 - **Another service's dependency** is the one place mocking the
   generated gRPC client is the right call, not a compromise: it's a
   stable, deliberately-versioned wire contract that changes rarely and
   on purpose, unlike an internal interface that might shift daily — the
-  usual reason to avoid mocks doesn't apply here.
+  usual reason to avoid mocks doesn't apply here. That mock lives in
+  `clients/<dependency-name>/module.go` as `FakeClient`, returned by
+  `NewForTesting()` — never redefined per test file. Before this
+  pattern existed, two services (`geneticslab` and `nest`, both calling
+  BankService) each carried their own byte-for-byte identical
+  hand-rolled fake; `clients/` is what a second consumer of the same
+  dependency should reach for instead of writing that duplicate.
+
+**Every constructor in `module/` — testing and production alike — is a
+lazy singleton, `NewXXXForTesting()` included.** This is a deliberate,
+accepted tradeoff, not an oversight: it means two tests in the same
+package share one instance unless something resets it between them,
+which is exactly what `Reset()` is for.
+
+- Every `module/` package (`repository/module`, `core/<domain>/module`,
+  and every `clients/<name>/module.go`) exports a `Reset()` that clears
+  its own memoized instance(s) *and* calls `Reset()` on every module
+  package it directly depends on — the same edges as its own imports,
+  no more, no less. A `core/<domain>/module.Reset()` that wires a
+  repository, a client, and a randomid generator calls all three
+  `Reset()`s; it doesn't need to know or care that the client's own
+  `Reset()` further cascades into whatever *it* depends on.
+- A test that constructs directly from a `module/` package — calling
+  `NewManagerForTesting()`, or reaching into `clients/X.NewForTesting()`
+  for per-test configuration — registers `t.Cleanup(module.Reset)`
+  right there. The cascade handles everything transitively used; the
+  test only needs to name the module(s) it touched directly.
+- This means a test never needs a second instance to simulate a
+  dependency changing mid-test (a later call failing after an earlier
+  one succeeded, a clock advancing) — mutate the same `FakeClient` (or
+  `FakeXXXManager`) the code under test is already holding. A
+  dependency invoked more than once over an object's lifetime (e.g. a
+  clock a `Manager` re-reads on every call, not a one-shot
+  `time.Now()` used to compute a value the caller stores and compares
+  itself) is exactly the case this serves — see `clients/clock` for the
+  concrete pattern: `FakeClient.Now()` reads a mutable `Time` field
+  live, so flipping it after construction is picked up by the code
+  under test's very next call, no rebuild required.
+- **Nothing in a test constructs `impl.NewXXX(...)` directly, and no
+  test file defines its own fake/stub type.** Both are exactly what
+  `module/` (for a service's own dependencies) and `clients/` (for
+  another service's) exist to centralize — a fake redefined per test
+  file is the thing this whole convention removes.
+- Known limitation, accepted for now: a `t.Parallel()` test sharing one
+  of these singletons races against another test's `Reset()`. Don't
+  add `t.Parallel()` to a test that goes through `module/`-constructed
+  dependencies without solving this first.
 
 ---
 
