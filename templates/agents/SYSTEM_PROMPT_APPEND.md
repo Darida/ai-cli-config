@@ -128,6 +128,19 @@ Update a folder's README after a significant change to its code, if the
 change affects scope, purpose, or in-package conventions. Keep entries
 short but clear.
 
+**A reference table or list (a service-account table, a repo list, a
+role matrix) stays pure current-state.** "Grant X because Y broke last
+week" is a story about how the state came to be, not the state itself
+— it doesn't belong in the row/entry, because a table nobody can scan
+in one pass stops being a reference. If a mistake is genuinely
+repeatable — not a one-off — write a short, generalized note (what to
+do, why, without the incident narrative) in a place someone would
+actually see it before repeating the mistake: a comment on the exact
+line/script most likely to trigger it, or a dedicated pitfalls/gotchas
+note near that code. The table still gets the current fact (the role
+that's now granted); the reasoning, if worth keeping at all, goes
+beside the code it protects, not inside the row.
+
 ---
 
 ## Git
