@@ -76,30 +76,36 @@ framework/             # the one exception to "no shared code" — see below
     module/
       module.go
 
-clients/               # one package per service *depended on*, shared by
-                        # every service that calls it — e.g. clients/bank/
-                        # for BankService. Not "no shared code" either: like
-                        # framework/, it carries no business logic beyond
-                        # calling the generated client — see **Testing**
-                        # below for why this exists and what belongs here
-                        # vs. in the depending service's own
-                        # core/<domain>/interface.go.
+clients/               # a memoized binding to another service's own
+                        # generated Connect client — one package per
+                        # service *depended on*, shared by every service
+                        # that calls it (e.g. clients/bank/ for
+                        # BankService), never duplicated per consumer.
+                        # No wrapper type, no adapter, no hand-written
+                        # interface — a consuming service holds the
+                        # generated critterv1connect.XServiceClient
+                        # interface directly as its own dependency type
+                        # and calls it directly. See **Testing** below
+                        # for the full rationale.
   <dependency-name>/
-    client.go            # Client — the real generated-client wrapper.
-                          # Flat at this level (no interface.go): there's
-                          # no locally-owned interface type here on
-                          # purpose, see the package doc in client.go
     fake/
-      fake_client.go       # FakeClient — the test double, in its own
-                            # subpackage (not client.go, not module.go)
-                            # so it's a normal, importable package a test
-                            # can reach for the concrete type directly
+      fake_x_service_client.go  # FakeXServiceClient, implementing the
+                                 # real generated XServiceClient
+                                 # interface directly (embeds the
+                                 # generated UnimplementedXServiceHandler
+                                 # to cover methods no current consumer
+                                 # calls) — in its own subpackage so a
+                                 # test can import it for the concrete
+                                 # type, separate from module/
     module/
-      module.go             # NewClient/NewForTesting/Reset — wiring
-                             # only, same split as repository/impl +
-                             # repository/module elsewhere in this tree;
-                             # never the place Client or FakeClient's own
-                             # logic lives
+      module.go             # NewClient (binds and memoizes the real
+                             # critterv1connect.NewXServiceClient) +
+                             # NewForTesting (memoizes fake.NewFakeXServiceClient)
+                             # + Reset — wiring only, same split as
+                             # repository/impl + repository/module
+                             # elsewhere in this tree. Never the place
+                             # Client or FakeClient's own logic lives —
+                             # there is no logic here beyond binding.
 
 services/
   <name>/
@@ -619,17 +625,37 @@ composition service only for assembled reads.
   no mocks. Always construct through `module/`, never any other way —
   see below for what that rules out.
 - **Another service's dependency** is the one place mocking the
-  generated gRPC client is the right call, not a compromise: it's a
+  generated Connect client is the right call, not a compromise: it's a
   stable, deliberately-versioned wire contract that changes rarely and
   on purpose, unlike an internal interface that might shift daily — the
-  usual reason to avoid mocks doesn't apply here. That mock is
-  `clients/<dependency-name>/fake.FakeClient`, returned (as a lazy
-  singleton) by `clients/<dependency-name>/module.NewForTesting()` —
-  never redefined per test file. Before this pattern existed, two
-  services (`geneticslab` and `nest`, both calling BankService) each
-  carried their own byte-for-byte identical hand-rolled fake;
-  `clients/` is what a second consumer of the same dependency should
-  reach for instead of writing that duplicate.
+  usual reason to avoid mocks doesn't apply here. **Hold the generated
+  `critterv1connect.XServiceClient` interface directly as the
+  dependency's type — never a hand-written interface wrapping it.**
+  That generated interface already is the correct, minimal abstraction
+  boundary; a hand-rolled one on top of it (`PaymentProcessor`,
+  `CreatureReader`, whatever) is a redundant layer this codebase used
+  to have and removed. The mock is
+  `clients/<dependency-name>/fake.FakeXServiceClient`, implementing
+  that same generated interface directly (via the generated
+  `UnimplementedXServiceHandler` embedded for the methods this
+  particular consumer never calls), returned (as a lazy singleton) by
+  `clients/<dependency-name>/module.NewForTesting()` — never redefined
+  per test file. Before this pattern existed, two services
+  (`geneticslab` and `nest`, both calling BankService) each carried
+  their own byte-for-byte identical hand-rolled fake *and* hand-rolled
+  interface; `clients/` is what a second consumer of the same
+  dependency should reach for instead of writing that duplicate.
+- **A private helper method wrapping one RPC call is fine and expected
+  — a shared type is not.** `core/<domain>/impl/manager.go` commonly
+  has small unexported methods (`hold`, `confirm`, `getCreature`, ...)
+  that build a `connect.NewRequest(...)`, call the generated client
+  directly, and unwrap the response — purely for that one file's own
+  readability, never imported by anything else. That's not "a library"
+  in the sense this section warns against: it's unexported, lives in
+  the one file that uses it, and every other manager with the same
+  dependency writes its own copy rather than sharing one. The line is
+  sharing an *implementation* across services, not writing a helper
+  function at all.
 
 **Every constructor in `module/` — testing and production alike — is a
 lazy singleton, `NewXXXForTesting()` included.** This is a deliberate,
