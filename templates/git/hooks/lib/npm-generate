@@ -1,0 +1,66 @@
+#!/bin/bash
+# Regenerates (via `npm run <script>`) and, if that changed anything,
+# commits it as its own commit — same reasoning as go-generate. Skips
+# gracefully if the repo has no package.json.
+#
+# --stage-only swaps that commit for a plain `git add`, for callers
+# running inside a pre-commit hook: a pre-commit hook runs nested inside
+# an already-in-progress `git commit`, which has already locked in the
+# parent commit it intends to update HEAD from. A second, independent
+# `git commit` run by this script in that window moves HEAD out from
+# under it, and the outer commit's own HEAD update then fails. Staging
+# instead lets the outer commit absorb the change itself, with no
+# separate ref update involved. A pre-push caller isn't nested inside a
+# commit's ref update, so it keeps the default (separate, clearly
+# labeled) commit.
+set -e
+
+for arg in "$@"; do
+    case "$arg" in
+        --repo=*) REPO="${arg#--repo=}" ;;
+        --script=*) SCRIPT="${arg#--script=}" ;;
+        --generated-dir=*) GEN_DIR="${arg#--generated-dir=}" ;;
+        --stage-only) STAGE_ONLY=1 ;;
+        *) echo "❌ npm-generate: unknown argument: $arg" >&2; exit 1 ;;
+    esac
+done
+if [ -z "${REPO:-}" ] || [ -z "${SCRIPT:-}" ] || [ -z "${GEN_DIR:-}" ]; then
+    echo "❌ npm-generate: usage: npm-generate --repo=<path> --script=<npm-script-name> --generated-dir=<relative> [--stage-only]" >&2
+    exit 1
+fi
+
+if [ ! -f "$REPO/package.json" ]; then
+    echo "⏭️ No package.json found. Skipping npm generate for this repository."
+    exit 0
+fi
+
+# Same reasoning as go-generate: the generate script only ever writes
+# what current sources ask for, never deletes an output whose source was
+# since renamed/removed — wiping $GEN_DIR before every regeneration is
+# what actually keeps it accurate, not just a formality.
+rm -rf "${REPO:?}/$GEN_DIR"
+mkdir -p "$REPO/$GEN_DIR"
+
+echo "🧪 npm run $SCRIPT"
+if ! npm --prefix "$REPO" run "$SCRIPT"; then
+    echo "❌ npm run $SCRIPT failed!" >&2
+    exit 1
+fi
+
+CHANGES=$(git -C "$REPO" status --porcelain -- "$GEN_DIR")
+if [ -z "$CHANGES" ]; then
+    echo "✓ $GEN_DIR is up to date"
+    exit 0
+fi
+
+if [ -n "${STAGE_ONLY:-}" ]; then
+    echo "⚠️  $GEN_DIR changed — staging into the in-progress commit..."
+    git -C "$REPO" add "$GEN_DIR"
+    echo "✓ $GEN_DIR staged"
+    exit 0
+fi
+
+echo "⚠️  $GEN_DIR changed — committing automatically..."
+git -C "$REPO" add "$GEN_DIR"
+git -C "$REPO" commit --no-verify -m "chore: regenerate $GEN_DIR" -- "$GEN_DIR"
+echo "✓ $GEN_DIR committed"
