@@ -37,6 +37,16 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/prompt-guard/question-readonly-note.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
