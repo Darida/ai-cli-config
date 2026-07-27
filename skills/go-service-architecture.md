@@ -79,16 +79,27 @@ framework/             # the one exception to "no shared code" — see below
 clients/               # one package per service *depended on*, shared by
                         # every service that calls it — e.g. clients/bank/
                         # for BankService. Not "no shared code" either: like
-                        # framework/, it carries no business logic, just a
-                        # generated-client wrapper plus its test double. See
-                        # **Testing** below for why this exists and what
-                        # belongs here vs. in the depending service's own
+                        # framework/, it carries no business logic beyond
+                        # calling the generated client — see **Testing**
+                        # below for why this exists and what belongs here
+                        # vs. in the depending service's own
                         # core/<domain>/interface.go.
   <dependency-name>/
-    module.go            # Client (real) + FakeClient (test double) +
-                          # NewClient/NewForTesting/Reset — flat, no impl/
-                          # or interface/ split, since there's exactly one
-                          # real implementation and one fake, both trivial
+    client.go            # Client — the real generated-client wrapper.
+                          # Flat at this level (no interface.go): there's
+                          # no locally-owned interface type here on
+                          # purpose, see the package doc in client.go
+    fake/
+      fake_client.go       # FakeClient — the test double, in its own
+                            # subpackage (not client.go, not module.go)
+                            # so it's a normal, importable package a test
+                            # can reach for the concrete type directly
+    module/
+      module.go             # NewClient/NewForTesting/Reset — wiring
+                             # only, same split as repository/impl +
+                             # repository/module elsewhere in this tree;
+                             # never the place Client or FakeClient's own
+                             # logic lives
 
 services/
   <name>/
@@ -611,13 +622,14 @@ composition service only for assembled reads.
   generated gRPC client is the right call, not a compromise: it's a
   stable, deliberately-versioned wire contract that changes rarely and
   on purpose, unlike an internal interface that might shift daily — the
-  usual reason to avoid mocks doesn't apply here. That mock lives in
-  `clients/<dependency-name>/module.go` as `FakeClient`, returned by
-  `NewForTesting()` — never redefined per test file. Before this
-  pattern existed, two services (`geneticslab` and `nest`, both calling
-  BankService) each carried their own byte-for-byte identical
-  hand-rolled fake; `clients/` is what a second consumer of the same
-  dependency should reach for instead of writing that duplicate.
+  usual reason to avoid mocks doesn't apply here. That mock is
+  `clients/<dependency-name>/fake.FakeClient`, returned (as a lazy
+  singleton) by `clients/<dependency-name>/module.NewForTesting()` —
+  never redefined per test file. Before this pattern existed, two
+  services (`geneticslab` and `nest`, both calling BankService) each
+  carried their own byte-for-byte identical hand-rolled fake;
+  `clients/` is what a second consumer of the same dependency should
+  reach for instead of writing that duplicate.
 
 **Every constructor in `module/` — testing and production alike — is a
 lazy singleton, `NewXXXForTesting()` included.** This is a deliberate,
@@ -626,7 +638,7 @@ package share one instance unless something resets it between them,
 which is exactly what `Reset()` is for.
 
 - Every `module/` package (`repository/module`, `core/<domain>/module`,
-  and every `clients/<name>/module.go`) exports a `Reset()` that clears
+  and every `clients/<name>/module`) exports a `Reset()` that clears
   its own memoized instance(s) *and* calls `Reset()` on every module
   package it directly depends on — the same edges as its own imports,
   no more, no less. A `core/<domain>/module.Reset()` that wires a
@@ -634,8 +646,9 @@ which is exactly what `Reset()` is for.
   `Reset()`s; it doesn't need to know or care that the client's own
   `Reset()` further cascades into whatever *it* depends on.
 - A test that constructs directly from a `module/` package — calling
-  `NewManagerForTesting()`, or reaching into `clients/X.NewForTesting()`
-  for per-test configuration — registers `t.Cleanup(module.Reset)`
+  `NewManagerForTesting()`, or reaching into
+  `clients/X/module.NewForTesting()` for per-test configuration —
+  registers `t.Cleanup(module.Reset)`
   right there. The cascade handles everything transitively used; the
   test only needs to name the module(s) it touched directly.
 - This means a test never needs a second instance to simulate a
