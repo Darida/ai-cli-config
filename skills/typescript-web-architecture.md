@@ -56,21 +56,30 @@ solving a problem this kind of project doesn't have.
 
 ```
 src/
-  main.ts              # boot only: build the transport/interceptors, mount
-                        # the root view, start the refresh-poll interval.
-                        # No rendering logic, no RPC calls of its own.
+  main.ts              # boot only: build the transport/interceptors, create
+                        # the refresh event bus, mount the root view, start
+                        # the refresh-poll interval. No rendering logic, no
+                        # RPC calls of its own, and no client-state
+                        # knowledge — see **Mutation Detection** below.
   state.ts              # the shared, mutable client-state singleton — the
                          # one thing with no backend equivalent (backend
                          # services are stateless/request-triggered; a
                          # browser client is not, so this file's existence
                          # is a genuine, accepted difference, not an
                          # oversight).
-  client.ts              # a factory that builds a generated-client instance
-                          # for a given service descriptor, using the
-                          # *current* state.backendUrl and the framework
-                          # interceptors — see **Generated Client** below
-                          # for why this is a factory, not a singleton.
+  clients/
+    <name>/client.ts    # a factory that builds a generated-client instance
+                         # for a given service descriptor, using a caller-
+                         # supplied backend URL and the framework
+                         # interceptors — see **Generated Client** below
+                         # for why this is a factory, not a singleton.
+                         # Nested under a service name for when a second
+                         # backend is ever added; exact shape still
+                         # provisional.
   framework/
+    event-bus.ts            # generic pub/sub — `subscribe`/`emit`, no
+                             # knowledge of payload meaning or who's
+                             # listening. See **Mutation Detection**.
     guarded.ts             # generic try/catch + caller-supplied error
                             # handler — knows nothing about creatures,
                             # nests, or any other domain concept.
@@ -245,9 +254,17 @@ const isMutating = "requestId" in req.method.input.field;
 ```
 
 `refresh-on-mutation-interceptor.ts` checks exactly this, and — after
-any call where it's true succeeds — calls a single, generic,
-provided `refreshAll()`. This is deliberately not surgical about
-*which* views are affected by a given mutation: computing that requires
+any call where it's true succeeds — emits on a generic `EventBus<void>`
+(`framework/event-bus.ts`) rather than calling a refresh function
+directly. The interceptor doesn't know what "refresh" means or who's
+listening, only that a mutation happened; whatever owns rendering
+(currently `views/deprecated_view.ts`'s `mount()`) subscribes to that
+same bus and runs its own local refresh-and-rerender in response. The
+same bus is also what `main.ts`'s poll interval emits on, so a periodic
+tick and an actual mutation are indistinguishable to the subscriber —
+one `EventBus<void>` covers "something might have changed" from either
+source. This is deliberately not surgical about *which* views are
+affected by a given mutation: computing that requires
 the frontend to model every possible backend side effect of every
 mutation (a real, previously-hit failure mode — see e.g.
 `DiscardCreature`'s `breeding_cancelled` response field, which exists
@@ -269,20 +286,22 @@ the button that triggered it:
 
 ```ts
 discardBtn.addEventListener("click", () => guarded(async () => {
-  const resp = await client(CreatureService).discardCreature({ name: creature.name });
+  const resp = await client(CreatureService, state.backendUrl).discardCreature({ name: creature.name });
   logInfo(`Discarded ${creature.name}`);
 }, logError));
 ```
 
 **Migration note:** a codebase mid-migration off a hand-written,
-per-RPC wrapper client (like this project's old `api.ts`) can keep a
-transitional `actions/` folder — one file per former handler,
-now calling the generated client — for as long as its rendering code
-hasn't yet been split into real per-domain `components/`. That's a
-staging step, not a deviation from this pattern: once rendering moves
-into properly-scoped components, each action's call collapses into that
-component's own event handler as shown above, and the transitional
-`actions/` folder is deleted, not migrated further.
+per-RPC wrapper client (like this project's old `api.ts`) does not need
+a transitional `actions/` folder — that would be new structure serving
+code that's about to be deleted anyway. Instead, keep the old rendering
+code as a single, deliberately-unsplit file (e.g.
+`views/deprecated_view.ts`) with every former handler inlined as a
+local function, wired to the generated client and the new event bus.
+That's a staging step, not a deviation from this pattern: once the real
+redesign lands, this file is deleted wholesale, not incrementally
+refactored into `components/` — so it isn't worth giving it real
+internal structure in the meantime.
 
 ## Event Wiring — Whoever Renders It Owns It
 
