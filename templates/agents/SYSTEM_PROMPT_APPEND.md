@@ -47,6 +47,10 @@ silently refuse it either.
   short (2 lines max outside genuine complexity); prefer a well-named
   helper/variable over a comment, and skip narrating history unless it's
   non-obvious or the code would look wrong without it.
+- **File ordering.** Data-type/interface definitions default to their
+  own file, separate from the functions using them. Within a file,
+  order public before private, most important/complex before trivial;
+  `main()`, if present, goes first as the file's own entry point.
 
 ---
 
@@ -172,6 +176,20 @@ belong in the file — that's what the commit message and PR description
 are for. The exception is when the reason itself is non-obvious, or the
 current code would look wrong or contradict common sense to a reader who
 doesn't know it; a short note earns its place there.
+
+---
+
+## File Ordering
+
+Default to putting a data type's structure/interface definition in its
+own file, separate from the functions that operate on it — attempt this
+whenever the split is reasonable, so any consumer can import the shape
+without pulling in logic it doesn't need.
+
+Within a file, order functions public before private, and within each of
+those, most important/complex before least. `main()`, when a file has
+one, goes at the very top — it's the file's own public entry point, even
+though it's usually the last thing to actually run.
 
 ---
 
