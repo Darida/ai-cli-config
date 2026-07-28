@@ -37,3 +37,7 @@
 #    own node_modules, installed by git/setup) — parent dirs are included
 #    above, this re-excludes just the generated subtree.
 templates/**/node_modules/
+
+# 9. Single-person workspace, no CI reinstalling from scratch — lockfile
+#    reproducibility across contributors/machines isn't needed here.
+templates/**/package-lock.json
