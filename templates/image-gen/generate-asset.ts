@@ -185,9 +185,10 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
         "Model selection needs an OpenRouter API key: git config openrouter.imagenapikey, read from " +
         "whichever repo the current directory is inside (see readGitConfigKey).\n" +
         "To re-tune CHROMA_KEY_* constants against an already-generated raw without spending on a " +
-        "fresh generation, use ./clean-image instead — it only works if this asset's generation " +
-        "actually needed chroma-key cleanup in the first place (native-transparent and opaque " +
-        "outputs never cache a raw, since there's nothing to re-clean).",
+        "fresh generation, use `./clean-image --input=<destination>.raw --output=<destination>` " +
+        "instead — only works if this asset's generation actually needed chroma-key cleanup in the " +
+        "first place (native-transparent and opaque outputs never cache a raw, since there's " +
+        "nothing to re-clean).",
     );
   }
 

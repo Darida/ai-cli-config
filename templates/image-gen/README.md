@@ -39,15 +39,16 @@ that cwd, and so does the OpenRouter API key lookup (see Auth below).
   resolution` overrides every asset's own `minResolution` for that one
   run without editing its spec — useful while iterating on prompts/layout
   to keep requests cheap.
-- **`./clean-image --assets-dir <path> <asset-id>`** — re-runs just the
-  chroma-key cleanup step (see Transparency) against an already-cached
-  `<destination>.raw` file, without calling any generation API again.
-  Free and fully offline — no network calls at all — so it's safe to
-  re-run repeatedly while tuning the `CHROMA_KEY_*` constants at the top
-  of `clean-image.ts`. Fails if no `.raw` file exists for that asset,
-  which is also the normal case for an asset whose generation didn't need
-  chroma-key cleanup in the first place (see below) — there's nothing to
-  re-clean for those.
+- **`./clean-image --input=<path> --output=<path>`** — re-runs just the
+  chroma-key cleanup step (see Transparency) against an already-cached raw
+  file (typically `<destination>.raw` from a prior `generate-asset` run),
+  without calling any generation API again. Takes plain file paths, not
+  `--assets-dir`/asset id — no asset-spec/JSON knowledge involved. Free
+  and fully offline — no network calls at all — so it's safe to re-run
+  repeatedly while tuning the `CHROMA_KEY_*` constants at the top of
+  `clean-image.ts`. Fails if `--input` doesn't exist; a `.raw` file only
+  exists for an asset whose generation actually needed chroma-key cleanup
+  in the first place (see below) — there's nothing to re-clean for others.
 - **`./list-image-models --assets-dir <path> <asset-id>`** — human-facing
   landscape view. Estimates a real dollar cost for every OpenRouter
   Images API model/provider endpoint against that asset's actual spec +

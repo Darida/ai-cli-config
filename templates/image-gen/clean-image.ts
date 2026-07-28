@@ -2,21 +2,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
-import type { AssetSpec } from "./image-cost-estimate";
 
 // Chroma-key cleanup, extracted so it's usable both as a library function
 // (generate-asset.ts calls cleanImage() right after a generation that
 // needed it) and standalone against an already-cached raw file:
-// `./clean-image --assets-dir <path> <asset-id>`. There's no "maybe skip
-// cleaning" branch in here — invoking this at all, either way, means
-// chroma-key cleanup is what's needed. A generation whose output didn't
-// need it (native transparent support, or an opaque background) never
-// writes a `.raw` file in the first place (see generate-asset.ts's
-// main()) — it writes its final image directly, since a pure format
-// re-encode has nothing worth caching for a later re-clean pass. So a
-// `.raw` file's mere existence already means chroma-key applies; running
-// this against one never needs to ask "was chroma-key actually needed
-// here?" over the network or from any stored flag.
+// `./clean-image --input=<path> --output=<path>`. No asset-spec/JSON
+// knowledge here at all — just two file paths — so there's no "maybe skip
+// cleaning" branch either: invoking this at all, on any input, means
+// chroma-key cleanup is what's wanted. generate-asset.ts's own convention
+// (a `.raw` file only ever exists for an asset whose generation actually
+// needed chroma-key cleanup — see its main()) lives entirely on that
+// file's side, not in here.
 const CHROMA_KEY_COLOR: [number, number, number] = [255, 0, 255]; // magenta — absent from every asset's actual palette
 // Keyness = min(r, b) - g: how strongly a pixel matches magenta's actual
 // signature (R and B both high, G suppressed), regardless of brightness.
@@ -74,10 +70,6 @@ export async function cleanImage(rawBytes: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function readSpec(assetsDir: string, assetId: string): Promise<AssetSpec> {
-  return JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
-}
-
 // The caller's actual directory, not this process's real cwd — see
 // bin/clean-image's own comment for why the two differ (vite-node needs
 // real cwd to be this package's own directory to resolve dependencies
@@ -86,39 +78,42 @@ function callerCwd(): string {
   return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  let assetsDir: string | undefined;
-  const positional: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--assets-dir") {
-      assetsDir = args[++i];
-    } else {
-      positional.push(args[i]);
+function parseArgs(argv: string[]): { input: string; output: string } {
+  let input: string | undefined;
+  let output: string | undefined;
+
+  for (const arg of argv) {
+    if (arg.startsWith("--input=")) {
+      input = arg.slice("--input=".length);
+    } else if (arg.startsWith("--output=")) {
+      output = arg.slice("--output=".length);
     }
   }
-  const assetId = positional[0];
 
-  if (!assetsDir || !assetId) {
+  if (!input || !output) {
     throw new Error(
-      "Usage: clean-image --assets-dir <path> <asset-id>  (e.g. building-arena)\n" +
-        "Applies chroma-key cleanup to that asset's already-cached <destination>.raw file " +
-        "(destination resolved relative to the current directory) — fails if none exists " +
-        "(never silently regenerates; run generate-asset for that). Free and offline: no " +
-        "network calls, no API cost, safe to re-run while tuning CHROMA_KEY_* above.",
+      "Usage: clean-image --input=<path> --output=<path>\n" +
+        "Applies chroma-key cleanup to the raw image at --input and writes the result to " +
+        "--output (both resolved relative to the current directory). No asset-spec/JSON " +
+        "involved — just two file paths. Free and offline: no network calls, no API cost, " +
+        "safe to re-run while tuning CHROMA_KEY_* above.",
     );
   }
 
-  const spec = await readSpec(resolve(callerCwd(), assetsDir), assetId);
-  const destination = resolve(callerCwd(), spec.destination);
-  const rawPath = `${destination}.raw`;
-  const rawBytes = await readFile(rawPath);
+  return { input, output };
+}
 
+async function main() {
+  const { input, output } = parseArgs(process.argv.slice(2));
+  const inputPath = resolve(callerCwd(), input);
+  const outputPath = resolve(callerCwd(), output);
+
+  const rawBytes = await readFile(inputPath);
   const imageBytes = await cleanImage(rawBytes);
-  await mkdir(dirname(destination), { recursive: true });
-  await writeFile(destination, imageBytes);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, imageBytes);
 
-  console.log(`Wrote ${imageBytes.length} bytes to ${destination} (re-cleaned from cached raw at ${rawPath})`);
+  console.log(`Wrote ${imageBytes.length} bytes to ${outputPath} (re-cleaned from ${inputPath})`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
