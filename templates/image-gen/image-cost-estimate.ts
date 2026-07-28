@@ -43,21 +43,25 @@ export function tierMegapixels(resolution: ImageGenerationRequirements["minResol
 // estimated with one general formula instead: standard Vision Transformer
 // patch tokenization, N = (H×W)/P².
 //
-// PATCH_SIZE_PX = 44 is calibrated against exactly one real observation
-// (see image-cost-estimate.test.ts), not a documented billing formula: a
-// real generate-asset.ts run against google/gemini-3-pro-image-preview
-// produced a 1408x768 image billed at 560 output-image tokens (isolated
-// from that request's usage breakdown — the raw response also included
-// 258 reasoning/thinking tokens and a second generated image, both
-// excluded here since they're not part of what this formula estimates).
-// 1408*768/560 = ~43.9, rounded to a clean 44. The original guess of 16px
-// (ViT-Base's typical *input*-image patch size) overestimated
-// output-generation tokens by ~2.7x against that same data point —
-// output-image token accounting isn't the same thing as input-image
-// vision tokenization, even within one provider. This is the one knob to
-// retune, as more real generation runs give more data points to
-// calibrate against.
-const PATCH_SIZE_PX = 44;
+// PATCH_SIZE_PX = 33 is calibrated against two real observations (see
+// image-cost-estimate.test.ts), not a documented billing formula — both
+// against the same 1024x1024 "1K"-tier pixel budget this estimate always
+// uses for minResolution="1K":
+//   - google/gemini-3-pro-image-preview: real billed cost implies ~820
+//     output-image tokens for one image → P = sqrt(1024²/820) ≈ 35.76
+//   - google/gemini-3.1-flash-lite-image: real billed cost implies
+//     exactly 1120 output-image tokens (this one really was generated at
+//     1024x1024, no tier approximation involved) → P = sqrt(1024²/1120)
+//     ≈ 30.60
+// No single patch size fits both real rates exactly, so PATCH_SIZE_PX is
+// their geometric mean, sqrt(35.76 * 30.60) ≈ 33.08, rounded to 33 — this
+// keeps both calibration tests within their 30% tolerance (~17% and ~14%
+// off respectively) instead of fitting one observation exactly and
+// missing the other by ~2x, which is what the previous single-point
+// calibration (44) did once a second observation existed to check it
+// against. This is the one knob to retune, as more real generation runs
+// give more data points to calibrate against.
+const PATCH_SIZE_PX = 33;
 
 function estimateOutputImageTokens(totalPixels: number): number {
   return Math.round(totalPixels / (PATCH_SIZE_PX * PATCH_SIZE_PX));
