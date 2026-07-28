@@ -111,9 +111,9 @@ Four layers, each with one job:
   `"opaque"` with the chroma-key clause appended to `promptText`. Returns
   `null` when nothing here makes the model usable (unsupported aspect
   ratio, or no resolution tier meets the floor). `supportsBackground()`/
-  `supportsAspectRatio()`/`pickResolutionTier()` live here too, exported
-  only for independent unit testing — every real caller in this package
-  goes through `adjust()`, never these directly.
+  `supportsAspectRatio()`/`pickResolutionTier()` live here too, as
+  module-private helpers — nothing outside this file ever calls them, only
+  `adjust()` does, so they're not exported.
   `shouldCleanupImage(original, adjusted)` compares an `adjust()`
   input/output pair to tell whether a fallback workaround got applied
   (currently: did `background` get downgraded from `"transparent"`) —

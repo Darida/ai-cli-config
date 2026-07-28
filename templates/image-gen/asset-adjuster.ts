@@ -16,38 +16,6 @@ const CHROMA_KEY_BACKGROUND_CLAUSE =
 const RESOLUTION_RANK: Record<string, number> = { "512": 0, "0.5K": 0, "1K": 1, "2K": 2, "4K": 3 };
 const RESOLUTION_TIERS = ["0.5K", "1K", "2K", "4K"] as const;
 
-// These are exported for independent unit testing only — every real
-// caller in this package goes through adjust() below, never these
-// directly.
-
-export function supportsBackground(model: Model, background: ImageGenerationRequirements["background"]): boolean {
-  if (background === "opaque") return true; // every model renders an opaque background by default
-  return model.supported_parameters?.background?.values?.includes("transparent") ?? false;
-}
-
-export function supportsAspectRatio(model: Model, aspectRatio: ImageGenerationRequirements["aspectRatio"]): boolean {
-  if (!aspectRatio) return true; // no requirement — every model qualifies
-  return model.supported_parameters?.aspect_ratio?.values?.includes(aspectRatio) ?? false;
-}
-
-// The cheapest of our own tier names that's still at/above minResolution
-// and that this model actually declares support for — or undefined if
-// nothing qualifies. A model with no declared resolution parameter at all
-// is assumed to output around its own native ~512px by default, so it
-// only qualifies for 0.5K floors.
-export function pickResolutionTier(
-  model: Model,
-  minResolution: ImageGenerationRequirements["minResolution"],
-): ImageGenerationRequirements["minResolution"] | undefined {
-  const declared = model.supported_parameters?.resolution?.values;
-  const floorRank = RESOLUTION_RANK[minResolution];
-  if (!declared || declared.length === 0) {
-    return floorRank <= RESOLUTION_RANK["512"] ? minResolution : undefined;
-  }
-  const qualifyingRanks = declared.map((v) => RESOLUTION_RANK[v]).filter((r): r is number => r !== undefined && r >= floorRank);
-  return qualifyingRanks.length === 0 ? undefined : RESOLUTION_TIERS[Math.min(...qualifyingRanks)];
-}
-
 // Whether `model` can serve `spec` at all and, if so, a spec adjusted to
 // what it actually supports: minResolution substituted for the cheapest
 // qualifying tier, and — when the model can't natively render
@@ -78,4 +46,32 @@ export function adjust(spec: ImageGenerationRequirements, model: Model): ImageGe
 // bespoke flag per workaround.
 export function shouldCleanupImage(original: ImageGenerationRequirements, adjusted: ImageGenerationRequirements): boolean {
   return original.background === "transparent" && adjusted.background !== "transparent";
+}
+
+function supportsBackground(model: Model, background: ImageGenerationRequirements["background"]): boolean {
+  if (background === "opaque") return true; // every model renders an opaque background by default
+  return model.supported_parameters?.background?.values?.includes("transparent") ?? false;
+}
+
+function supportsAspectRatio(model: Model, aspectRatio: ImageGenerationRequirements["aspectRatio"]): boolean {
+  if (!aspectRatio) return true; // no requirement — every model qualifies
+  return model.supported_parameters?.aspect_ratio?.values?.includes(aspectRatio) ?? false;
+}
+
+// The cheapest of our own tier names that's still at/above minResolution
+// and that this model actually declares support for — or undefined if
+// nothing qualifies. A model with no declared resolution parameter at all
+// is assumed to output around its own native ~512px by default, so it
+// only qualifies for 0.5K floors.
+function pickResolutionTier(
+  model: Model,
+  minResolution: ImageGenerationRequirements["minResolution"],
+): ImageGenerationRequirements["minResolution"] | undefined {
+  const declared = model.supported_parameters?.resolution?.values;
+  const floorRank = RESOLUTION_RANK[minResolution];
+  if (!declared || declared.length === 0) {
+    return floorRank <= RESOLUTION_RANK["512"] ? minResolution : undefined;
+  }
+  const qualifyingRanks = declared.map((v) => RESOLUTION_RANK[v]).filter((r): r is number => r !== undefined && r >= floorRank);
+  return qualifyingRanks.length === 0 ? undefined : RESOLUTION_TIERS[Math.min(...qualifyingRanks)];
 }

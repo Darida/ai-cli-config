@@ -26,7 +26,7 @@ export function estimateTokens(text: string): number {
 // the edge length of the *square* baseline, and an aspect-ratio-preserving
 // crop/resize to a non-square shape keeps that same total pixel count. So
 // megapixels = tier^2, independent of the asset's actual aspect ratio.
-export const TIER_EDGE_PX: Record<ImageGenerationRequirements["minResolution"], number> = {
+const TIER_EDGE_PX: Record<ImageGenerationRequirements["minResolution"], number> = {
   "0.5K": 512,
   "1K": 1024,
   "2K": 2048,
