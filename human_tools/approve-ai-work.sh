@@ -7,17 +7,36 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Default provider is OpenRouter; --gemini opts back into calling the
+# Gemini API directly (kept for comparison/fallback, not the common path).
+USE_GEMINI=false
+for arg in "$@"; do
+  case "$arg" in
+    --gemini) USE_GEMINI=true ;;
+  esac
+done
+
 # Accept the key as an input if the caller already has it (e.g.
 # approve-all-ai-work.sh reads it from each target repo's own local git
 # config before invoking this script) — otherwise fall back to reading it
 # from the current repo's git config, for standalone use.
-GEMINI_API_KEY="${GEMINI_API_KEY:-$(git config --get gemini.apikey || echo "")}"
-
-if [ -z "$GEMINI_API_KEY" ]; then
-  echo -e "${RED}Error: API key not found for this project.${NC}"
-  echo -e "To set it for this specific repository only, run:"
-  echo -e "git config --local gemini.apikey 'YOUR_KEY_HERE'"
-  exit 1
+if [ "$USE_GEMINI" = true ]; then
+  GEMINI_API_KEY="${GEMINI_API_KEY:-$(git config --get gemini.apikey || echo "")}"
+  if [ -z "$GEMINI_API_KEY" ]; then
+    echo -e "${RED}Error: Gemini API key not found for this project.${NC}"
+    echo -e "To set it for this specific repository only, run:"
+    echo -e "git config --local gemini.apikey 'YOUR_KEY_HERE'"
+    exit 1
+  fi
+else
+  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
+  if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
+    echo -e "To set it for this specific repository only, run:"
+    echo -e "git config --local openrouter.githubapikey 'YOUR_KEY_HERE'"
+    echo -e "${YELLOW}(Or pass --gemini to call the Gemini API directly instead.)${NC}"
+    exit 1
+  fi
 fi
 
 echo -e "${YELLOW}=== AI Work Approval Workflow ===${NC}\n"
@@ -62,7 +81,7 @@ else
 fi
 echo ""
 
-# 3. Generate PR title and description using gemini CLI
+# 3. Generate PR title and description (OpenRouter by default, --gemini for Gemini directly)
 echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
 # Images are binary and can be large — never send their contents to the AI,
 # only which ones changed. IMAGE_EXCLUDES/IMAGE_PATHSPECS must stay in sync.
@@ -89,7 +108,7 @@ fi
 PROMPT_CONTENT=$(cat "$PROMPT_FILE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
-echo "  - Calling Gemini API..."
+echo "  - Calling AI API ($([ "$USE_GEMINI" = true ] && echo "Gemini" || echo "OpenRouter"))..."
 # The prompt embeds the full diff, which routinely exceeds the OS's
 # argv/environment size limit once a branch accumulates enough changes
 # ("Argument list too long") -- so both the jq escaping step and the
@@ -112,32 +131,39 @@ if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   fi
 fi
 
-jq -n --rawfile text "$PROMPT_TMPFILE" '{contents: [{parts: [{text: $text}]}]}' > "$PAYLOAD_TMPFILE"
+if [ "$USE_GEMINI" = true ]; then
+  jq -n --rawfile text "$PROMPT_TMPFILE" '{contents: [{parts: [{text: $text}]}]}' > "$PAYLOAD_TMPFILE"
+  API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$PAYLOAD_TMPFILE")
+  AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
+else
+  # openrouter/auto lets OpenRouter pick the underlying model per request
+  # rather than pinning one here.
+  jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/auto", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+  API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$PAYLOAD_TMPFILE")
+  AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
+fi
 
-# Call the REST API directly (using gemini-1.5-flash for speed/cost)
-API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}" \
-  -H "Content-Type: application/json" \
-  --data-binary "@$PAYLOAD_TMPFILE")
-
-# Extract the generated text from the JSON response
-GEMINI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
-
-if [ -z "$GEMINI_OUTPUT" ]; then
-  echo -e "${RED}Error: Failed to generate PR title and description with gemini${NC}"
+if [ -z "$AI_OUTPUT" ]; then
+  echo -e "${RED}Error: Failed to generate PR title and description${NC}"
   echo -e "${YELLOW}Raw API Response (Debug Info):${NC}"
   echo "$API_RESPONSE"
   exit 1
 fi
 
 # Parse TITLE and DESCRIPTION from output
-PR_TITLE=$(echo "$GEMINI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
+PR_TITLE=$(echo "$AI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
 # Extract everything after "DESCRIPTION:" preserving newlines and formatting
-PR_DESCRIPTION=$(echo "$GEMINI_OUTPUT" | awk '/^DESCRIPTION:/ {flag=1; sub(/^DESCRIPTION:[ ]*/, ""); if (NF) print; next} flag')
+PR_DESCRIPTION=$(echo "$AI_OUTPUT" | awk '/^DESCRIPTION:/ {flag=1; sub(/^DESCRIPTION:[ ]*/, ""); if (NF) print; next} flag')
 
 if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
-  echo -e "${RED}Error: Invalid gemini output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
+  echo -e "${RED}Error: Invalid AI output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
   echo -e "${RED}Got:${NC}"
-  echo "$GEMINI_OUTPUT"
+  echo "$AI_OUTPUT"
   exit 1
 fi
 
