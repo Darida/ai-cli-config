@@ -70,7 +70,14 @@ IMAGE_PATHSPECS=()
 for pattern in "${IMAGE_EXCLUDES[@]}"; do
   IMAGE_PATHSPECS+=(":!${pattern}")
 done
-DIFF_CONTENT=$(git diff origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+DIFF_CONTENT=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+
+# Deleted files can be large (e.g. a removed source file) and their full
+# removed content is rarely useful for a PR description — list names only.
+DELETED_FILES=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+if [ -n "$DELETED_FILES" ]; then
+  DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${DELETED_FILES}"
+fi
 
 CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${IMAGE_EXCLUDES[@]}")
 if [ -n "$CHANGED_IMAGES" ]; then
