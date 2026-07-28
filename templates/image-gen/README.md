@@ -167,7 +167,24 @@ subject·a + magenta·(1-a)` — skipped below
 amplifies noise into wildly wrong colors. Finally re-encodes as a real
 alpha PNG.
 
-## Asset spec format
+## Input model
+
+Every tool in this package (`generate-asset`, `list-image-models`,
+`pick-image-model`, and the cost-estimation logic in
+`image-cost-estimate.ts`) works against one shared entity,
+`ImageGenerationRequirements` (`image-generation-requirements.ts`) — what
+asset to generate, in this toolkit's own provider-agnostic vocabulary.
+This is the officially supported input shape; nothing in this package
+accepts anything else.
+
+Each library function accepts that entity two ways:
+
+- **Folder + asset id** — `readImageGenerationRequirements(assetsDir,
+  assetId)` parses it off disk (what every CLI's `main()` does): the id's
+  `.json` file for the structural fields below, plus its `.prompt.txt` for
+  `promptText`.
+- **Already parsed, in memory** — pass the entity directly (what tests and
+  other programmatic callers do), no filesystem access involved.
 
 `<asset-id>.json` in `--assets-dir`:
 
@@ -192,5 +209,14 @@ alpha PNG.
   `1K`, `2K`, `4K`. More resolution is always fine.
 - `background` — `"transparent"` or `"opaque"`.
 
-`<asset-id>.prompt.txt` in the same directory: the raw prompt text, plain
-text (not JSON), so it stays easy to read and diff.
+`<asset-id>.prompt.txt` in the same directory: the raw prompt text (becomes
+`promptText` on the parsed entity), plain text (not JSON), so it stays easy
+to read and diff.
+
+Prompt text and structural config are deliberately two files, not one JSON
+blob with a `prompt` field: prompt-text edits are frequent, low-stakes
+wording tweaks, while config edits (aspect ratio, resolution, background)
+are rarer and more fundamental — they change actual layout/size decisions.
+Splitting them keeps each kind of edit's diff and `git blame` legible on
+its own, instead of every wording tweak burying config history in noise
+and vice versa.

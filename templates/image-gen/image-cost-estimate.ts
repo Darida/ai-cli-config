@@ -1,18 +1,11 @@
+import type { AssetSpec, ImageGenerationRequirements } from "./image-generation-requirements";
 import { estimateOutputImageTokens } from "./image-token-estimate";
 
 // Isolated, side-effect-free (no network/fs) on purpose — this is what
 // list-image-models.ts's CLI calls, and what image-cost-estimate.test.ts
 // (in this folder) checks against real recorded generations, without
 // either of them needing to duplicate the estimation logic itself.
-export interface AssetSpec {
-  destination: string;
-  // Omitted when no aspect ratio actually matters for this asset (e.g. the
-  // CSS force-stretches it to a fixed box regardless, or too few models
-  // support the one that would otherwise be wanted).
-  aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
-  minResolution: "0.5K" | "1K" | "2K" | "4K";
-  background: "transparent" | "opaque";
-}
+export type { AssetSpec };
 
 export interface ParamSpec {
   type: string;
@@ -113,7 +106,8 @@ export function pickResolutionValue(params: Record<string, ParamSpec> | undefine
   return qualifying[0];
 }
 
-export function estimateCost(endpoint: EndpointEntry, spec: AssetSpec, promptTokens: number): CostEstimate | null {
+export function estimateCost(endpoint: EndpointEntry, requirements: ImageGenerationRequirements): CostEstimate | null {
+  const promptTokens = estimateTokens(requirements.promptText);
   const inputTextLine = endpoint.pricing.find((p) => p.billable === "input_text" && p.unit === "token");
   const inputTextCost = inputTextLine ? inputTextLine.cost_usd * promptTokens : 0;
 
@@ -124,7 +118,7 @@ export function estimateCost(endpoint: EndpointEntry, spec: AssetSpec, promptTok
   if (!outputLine) return null;
 
   if (outputLine.unit === "image") {
-    const wanted = spec.minResolution.toLowerCase();
+    const wanted = requirements.minResolution.toLowerCase();
     const variantLine = endpoint.pricing.find(
       (p) => p.billable === "output_image" && p.unit === "image" && p.variant?.toLowerCase() === wanted,
     );
@@ -136,7 +130,7 @@ export function estimateCost(endpoint: EndpointEntry, spec: AssetSpec, promptTok
     // declares a matching `resolution` parameter — we're estimating what
     // we'd request, not gating on what the model claims to support (that's
     // feature filtering's job, deliberately disabled elsewhere right now).
-    return { usd: inputTextCost + outputLine.cost_usd * tierMegapixels(spec.minResolution) };
+    return { usd: inputTextCost + outputLine.cost_usd * tierMegapixels(requirements.minResolution) };
   }
 
   if (outputLine.unit === "token") {
@@ -144,7 +138,7 @@ export function estimateCost(endpoint: EndpointEntry, spec: AssetSpec, promptTok
     // and we deliberately don't hardcode vendor docs that would go stale)
     // — see image-token-estimate.ts for the one general formula applied
     // uniformly here, regardless of which provider this endpoint is.
-    const totalPixels = TIER_EDGE_PX[spec.minResolution] ** 2;
+    const totalPixels = TIER_EDGE_PX[requirements.minResolution] ** 2;
     const tokens = estimateOutputImageTokens(totalPixels);
     return { usd: inputTextCost + outputLine.cost_usd * tokens };
   }

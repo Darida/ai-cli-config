@@ -1,15 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  type AssetSpec,
-  type EndpointEntry,
-  estimateCost,
-  estimateTokens,
-  supportsAspectRatio,
-  supportsBackground,
-  supportsMinResolution,
-} from "./image-cost-estimate";
+import { type EndpointEntry, estimateCost, supportsAspectRatio, supportsBackground, supportsMinResolution } from "./image-cost-estimate";
+import { type ImageGenerationRequirements, readImageGenerationRequirements } from "./image-generation-requirements";
 import { fetchEndpoints, fetchModelList } from "./openrouter-images-api";
 
 // Automated model selection for one asset spec, built on the same data
@@ -68,7 +60,7 @@ function percentile(sortedAscending: number[], p: number): number {
   return sortedAscending[index];
 }
 
-export async function selectImageModel(spec: AssetSpec, promptTokens: number): Promise<ModelSelection> {
+export async function selectImageModel(requirements: ImageGenerationRequirements): Promise<ModelSelection> {
   const models = await fetchModelList();
   const endpointLists = await Promise.all(models.map((model) => fetchEndpoints(model.id)));
 
@@ -79,19 +71,21 @@ export async function selectImageModel(spec: AssetSpec, promptTokens: number): P
     }
   });
 
-  const aspectFiltered = allEndpoints.filter(({ endpoint }) => supportsAspectRatio(endpoint.supported_parameters, spec.aspectRatio));
-  const resolutionFiltered = aspectFiltered.filter(({ endpoint }) => supportsMinResolution(endpoint.supported_parameters, spec.minResolution));
+  const aspectFiltered = allEndpoints.filter(({ endpoint }) => supportsAspectRatio(endpoint.supported_parameters, requirements.aspectRatio));
+  const resolutionFiltered = aspectFiltered.filter(({ endpoint }) =>
+    supportsMinResolution(endpoint.supported_parameters, requirements.minResolution),
+  );
 
   const priced: PickedModel[] = [];
   for (const { modelId, endpoint } of resolutionFiltered) {
-    const estimate = estimateCost(endpoint, spec, promptTokens);
+    const estimate = estimateCost(endpoint, requirements);
     if (estimate && !estimate.note) {
       priced.push({ modelId, provider: endpoint.provider_name, usd: estimate.usd, endpoint });
     }
   }
 
   if (priced.length === 0) {
-    throw new Error(`No priced candidate model/provider endpoints remain for spec ${JSON.stringify(spec)} after filtering — cannot pick.`);
+    throw new Error(`No priced candidate model/provider endpoints remain for requirements ${JSON.stringify(requirements)} after filtering — cannot pick.`);
   }
 
   priced.sort((a, b) => a.usd - b.usd);
@@ -112,14 +106,6 @@ export async function selectImageModel(spec: AssetSpec, promptTokens: number): P
     percentile30,
     threshold,
   };
-}
-
-async function readSpec(assetsDir: string, assetId: string): Promise<AssetSpec> {
-  return JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
-}
-
-async function readPromptText(assetsDir: string, assetId: string): Promise<string> {
-  return (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
 }
 
 // The caller's actual directory, not this process's real cwd — see
@@ -148,15 +134,15 @@ async function main() {
   }
 
   const resolvedAssetsDir = resolve(callerCwd(), assetsDir);
-  const spec = await readSpec(resolvedAssetsDir, assetId);
-  const promptText = await readPromptText(resolvedAssetsDir, assetId);
-  const promptTokens = estimateTokens(promptText);
+  const requirements = await readImageGenerationRequirements(resolvedAssetsDir, assetId);
 
-  const selection = await selectImageModel(spec, promptTokens);
+  const selection = await selectImageModel(requirements);
   const { picked, pool } = selection;
   const transparentSupported = supportsBackground(picked.endpoint.supported_parameters, "transparent");
 
-  console.log(`Asset "${assetId}": aspectRatio=${spec.aspectRatio ?? "(any)"}, minResolution=${spec.minResolution}, background=${spec.background}.`);
+  console.log(
+    `Asset "${assetId}": aspectRatio=${requirements.aspectRatio ?? "(any)"}, minResolution=${requirements.minResolution}, background=${requirements.background}.`,
+  );
   console.log(`${selection.totalEndpoints} model/provider endpoints across ${selection.modelCount} models.\n`);
   console.log(`After aspect ratio filter: ${selection.afterAspectFilter}`);
   console.log(`After minResolution filter: ${selection.afterResolutionFilter}`);

@@ -1,31 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { cleanImage } from "./clean-image";
-import { estimateTokens, pickResolutionValue, supportsBackground } from "./image-cost-estimate";
+import { pickResolutionValue, supportsBackground } from "./image-cost-estimate";
+import { type ImageGenerationRequirements, readImageGenerationRequirements } from "./image-generation-requirements";
 import { fetchEndpoints } from "./openrouter-images-api";
 import { selectImageModel } from "./pick-image-model";
-
-// One asset spec == one <id>.json + one <id>.prompt.txt, both in whatever
-// directory --assets-dir points at (a project's own asset-prompt folder —
-// nothing in this file is specific to any one project). The JSON is our
-// own provider-agnostic vocabulary — aspectRatio/minResolution/background
-// all map directly onto OpenRouter's Images API request fields (see
-// generateImageOpenRouter below).
-interface AssetSpec {
-  destination: string; // output file path, relative to the caller's directory (see callerCwd()) — its extension is also the output format
-  // Omitted when no aspect ratio actually matters for a given asset.
-  aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
-  // A floor, not an exact request — more resolution is always fine, we
-  // just don't want less. See resolveOpenRouterModel()/pickResolutionValue
-  // for how a real per-model resolution value gets picked from this.
-  minResolution: "0.5K" | "1K" | "2K" | "4K";
-  // Passed as OpenRouter's own `background` request field when the model
-  // picked for this run declares support for it; otherwise the chroma-key
-  // workaround (see clean-image.ts) applies instead.
-  background: "transparent" | "opaque";
-}
 
 // OpenRouter's dedicated, provider-normalized Images API (not the general
 // chat-completions endpoint) — this is what actually exposes resolution/
@@ -88,15 +70,6 @@ function readOpenRouterApiKey(): string {
   return readGitConfigKey("openrouter.imagenapikey");
 }
 
-async function readSpec(assetsDir: string, assetId: string): Promise<AssetSpec> {
-  const raw = await readFile(resolve(assetsDir, `${assetId}.json`), "utf8");
-  return JSON.parse(raw) as AssetSpec;
-}
-
-async function readPromptText(assetsDir: string, assetId: string): Promise<string> {
-  return (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
-}
-
 function buildPromptText(promptText: string, needsChromaKey: boolean): string {
   return needsChromaKey ? promptText + CHROMA_KEY_BACKGROUND_CLAUSE : promptText;
 }
@@ -114,23 +87,21 @@ function outputFormat(destination: string): "png" | "jpeg" {
 // already had) to check transparent-background support and pick a real
 // resolution value right at the point they're used.
 async function resolveOpenRouterModel(
-  spec: AssetSpec,
-  promptText: string,
+  requirements: ImageGenerationRequirements,
 ): Promise<{ modelId: string; provider: string; needsChromaKey: boolean; resolutionValue: string | undefined }> {
-  const promptTokens = estimateTokens(promptText);
-  const { picked, pool } = await selectImageModel(spec, promptTokens);
+  const { picked, pool } = await selectImageModel(requirements);
 
   const endpoints = await fetchEndpoints(picked.modelId);
   const matchingEndpoint = endpoints.find((e) => e.provider_name === picked.provider) ?? picked.endpoint;
   const supportsTransparent = supportsBackground(matchingEndpoint.supported_parameters, "transparent");
-  const needsChromaKey = spec.background === "transparent" && !supportsTransparent;
+  const needsChromaKey = requirements.background === "transparent" && !supportsTransparent;
   // supportsMinResolution() (already applied by selectImageModel) only
   // guarantees *some* declared value meets the floor — never assume our
   // own "0.5K"/"512" shape is literally one of this model's declared
   // values. Pick the cheapest one that actually is; undefined (field
   // omitted from the request) when the model declares no resolution
   // parameter at all.
-  const resolutionValue = pickResolutionValue(matchingEndpoint.supported_parameters, spec.minResolution);
+  const resolutionValue = pickResolutionValue(matchingEndpoint.supported_parameters, requirements.minResolution);
 
   console.log(
     `OpenRouter model: ${picked.modelId} (${picked.provider}) — $${picked.usd.toFixed(4)} estimated, ` +
@@ -142,20 +113,20 @@ async function resolveOpenRouterModel(
   return { modelId: picked.modelId, provider: picked.provider, needsChromaKey, resolutionValue };
 }
 
-async function generateImageOpenRouter(promptText: string, spec: AssetSpec, apiKey: string): Promise<{ bytes: Buffer; needsChromaKey: boolean }> {
-  const { modelId, needsChromaKey, resolutionValue } = await resolveOpenRouterModel(spec, promptText);
+async function generateImageOpenRouter(requirements: ImageGenerationRequirements, apiKey: string): Promise<{ bytes: Buffer; needsChromaKey: boolean }> {
+  const { modelId, needsChromaKey, resolutionValue } = await resolveOpenRouterModel(requirements);
 
   const body = {
     model: modelId,
-    prompt: buildPromptText(promptText, needsChromaKey),
+    prompt: buildPromptText(requirements.promptText, needsChromaKey),
     resolution: resolutionValue,
-    aspect_ratio: spec.aspectRatio,
+    aspect_ratio: requirements.aspectRatio,
     // Only pass "transparent" when the picked model actually declares
     // support for it — an unsupported enum value risks a request-time
     // rejection from providers that validate strictly. When it doesn't,
     // the chroma-key clause above stands in for the request instead.
-    background: needsChromaKey ? undefined : spec.background,
-    output_format: outputFormat(spec.destination),
+    background: needsChromaKey ? undefined : requirements.background,
+    output_format: outputFormat(requirements.destination),
   };
 
   const response = await fetch(OPENROUTER_IMAGES_URL, {
@@ -183,9 +154,9 @@ async function generateImageOpenRouter(promptText: string, spec: AssetSpec, apiK
 
 const MIN_RESOLUTIONS = ["0.5K", "1K", "2K", "4K"] as const;
 
-function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceResolution?: AssetSpec["minResolution"] } {
+function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceResolution?: ImageGenerationRequirements["minResolution"] } {
   let assetsDir: string | undefined;
-  let forceResolution: AssetSpec["minResolution"] | undefined;
+  let forceResolution: ImageGenerationRequirements["minResolution"] | undefined;
   const positional: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -194,10 +165,10 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
       assetsDir = argv[++i];
     } else if (arg === "--force-resolution") {
       const value = argv[++i];
-      if (!MIN_RESOLUTIONS.includes(value as AssetSpec["minResolution"])) {
+      if (!MIN_RESOLUTIONS.includes(value as ImageGenerationRequirements["minResolution"])) {
         throw new Error(`--force-resolution must be one of ${MIN_RESOLUTIONS.join(", ")}, got "${value}"`);
       }
-      forceResolution = value as AssetSpec["minResolution"];
+      forceResolution = value as ImageGenerationRequirements["minResolution"];
     } else {
       positional.push(arg);
     }
@@ -226,14 +197,13 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
 async function main() {
   const { assetsDir, assetId, forceResolution } = parseArgs(process.argv.slice(2));
 
-  const spec = await readSpec(assetsDir, assetId);
+  const requirements = await readImageGenerationRequirements(assetsDir, assetId);
   if (forceResolution) {
-    spec.minResolution = forceResolution;
+    requirements.minResolution = forceResolution;
   }
-  const destination = resolve(callerCwd(), spec.destination);
-  const promptText = await readPromptText(assetsDir, assetId);
+  const destination = resolve(callerCwd(), requirements.destination);
 
-  const result = await generateImageOpenRouter(promptText, spec, readOpenRouterApiKey());
+  const result = await generateImageOpenRouter(requirements, readOpenRouterApiKey());
   const { bytes: rawBytes, needsChromaKey } = result;
 
   let imageBytes: Buffer;
@@ -247,7 +217,7 @@ async function main() {
     await writeFile(rawPath, rawBytes);
     imageBytes = await cleanImage(rawBytes);
   } else {
-    imageBytes = await sharp(rawBytes).toFormat(outputFormat(spec.destination)).toBuffer();
+    imageBytes = await sharp(rawBytes).toFormat(outputFormat(requirements.destination)).toBuffer();
   }
 
   await mkdir(dirname(destination), { recursive: true });
@@ -260,7 +230,9 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
-  process.exitCode = 1;
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+  });
+}
