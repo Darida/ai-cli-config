@@ -32,7 +32,6 @@ interface OpenRouterUsage {
 }
 
 interface RealObservation {
-  description: string;
   // The exact entity estimateCost() is called with — same shape every
   // library in this package accepts directly (no folder/file parsing
   // involved here).
@@ -70,13 +69,13 @@ const GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO: Model = {
 };
 
 const observations: RealObservation[] = [
+  // ui-scene-frame via google/gemini-3-pro-image-preview (Google AI Studio), old malformed
+  // chat-completions request — no aspect_ratio/resolution/background actually sent, model
+  // defaulted to its own 1408x768 output. minResolution below isn't literally what was
+  // requested (nothing was) — it's the "1K" tier whose 1024x1024 (~1.05MP) budget is the
+  // closest match to the 1408x768 (~1.08MP) actually produced, under this codebase's own
+  // square-edge total-pixel-budget convention (see TIER_EDGE_PX in image-cost-estimate.ts).
   {
-    description:
-      "ui-scene-frame via google/gemini-3-pro-image-preview (Google AI Studio), old malformed chat-completions " +
-      "request — no aspect_ratio/resolution/background actually sent, model defaulted to its own 1408x768 output. " +
-      "minResolution below isn't literally what was requested (nothing was) — it's the \"1K\" tier whose 1024x1024 " +
-      "(~1.05MP) budget is the closest match to the 1408x768 (~1.08MP) actually produced, under this codebase's own " +
-      "square-edge total-pixel-budget convention (see TIER_EDGE_PX in image-cost-estimate.ts).",
     requirements: {
       destination: "ui-scene-frame.png",
       minResolution: "1K",
@@ -113,11 +112,11 @@ const observations: RealObservation[] = [
     //   0.136 * (560 / 1548) = 0.0492 (rounded to 4dp)
     expectedEstimatedCost: 0.0492,
   },
+  // building-arena via google/gemini-3.1-flash-lite-image (Google AI Studio), real
+  // generate-asset.ts run through the current OpenRouter Images API path —
+  // resolution:"1K" requested (no aspect_ratio sent, spec has none), chroma-key cleanup
+  // applied.
   {
-    description:
-      "building-arena via google/gemini-3.1-flash-lite-image (Google AI Studio), real generate-asset.ts run " +
-      "through the current OpenRouter Images API path — resolution:\"1K\" requested (no aspect_ratio sent, spec " +
-      "has none), chroma-key cleanup applied.",
     requirements: {
       destination: "building-arena.png",
       minResolution: "1K",
@@ -150,8 +149,8 @@ const observations: RealObservation[] = [
 ];
 
 describe("image cost estimate calibration", () => {
-  for (const obs of observations) {
-    it(`${obs.description}: estimate is within ${COST_TOLERANCE * 100}% of the expected $${obs.expectedEstimatedCost.toFixed(4)}`, () => {
+  observations.forEach((obs, i) => {
+    it(`test_case_${i + 1}`, () => {
       const estimate = estimateCost(obs.model, obs.requirements);
       expect(estimate, "estimateCost() returned null (no output_image pricing line found on the test model)").not.toBeNull();
 
@@ -162,5 +161,5 @@ describe("image cost estimate calibration", () => {
         `estimated $${estimatedUsd.toFixed(4)} vs expected $${obs.expectedEstimatedCost.toFixed(4)} (${(error * 100).toFixed(1)}% off)`,
       ).toBeLessThanOrEqual(COST_TOLERANCE);
     });
-  }
+  });
 });
