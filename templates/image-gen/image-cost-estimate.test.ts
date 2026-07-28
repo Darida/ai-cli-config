@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { type EndpointEntry, estimateCost } from "./image-cost-estimate";
+import { estimateCost } from "./image-cost-estimate";
 import type { ImageGenerationRequirements } from "./image-generation-requirements";
+import type { Model } from "./model/types";
 
 // Calibration harness: each entry is one REAL generation we actually ran
 // and recorded the true billed usage for — checks estimateCost() (the
@@ -8,7 +9,7 @@ import type { ImageGenerationRequirements } from "./image-generation-requirement
 // package, including resolution-floor handling) against reality, not just
 // against itself. Add more entries here as more real generations get
 // recorded. If one starts failing (or a new one fails from the start), the
-// fix is tuning image-token-estimate.ts's PATCH_SIZE_PX, not this file.
+// fix is tuning image-cost-estimate.ts's PATCH_SIZE_PX, not this file.
 const COST_TOLERANCE = 0.3; // fail if our estimate is off by more than 30%
 
 // Raw usage object exactly as OpenRouter reported it for one real request —
@@ -36,7 +37,7 @@ interface RealObservation {
   // library in this package accepts directly (no folder/file parsing
   // involved here).
   requirements: ImageGenerationRequirements;
-  endpoint: EndpointEntry;
+  model: Model;
 
   // --- Documentation only, from here down. Never read by the assertion. ---
   apiUsage: OpenRouterUsage;
@@ -51,8 +52,9 @@ interface RealObservation {
   expectedEstimatedCost: number;
 }
 
-const GEMINI_3_PRO_IMAGE_PREVIEW_AI_STUDIO: EndpointEntry = {
-  provider_name: "Google AI Studio",
+const GEMINI_3_PRO_IMAGE_PREVIEW_AI_STUDIO: Model = {
+  modelId: "google/gemini-3-pro-image-preview",
+  provider: "Google AI Studio",
   supported_parameters: {},
   pricing: [
     { billable: "input_image", unit: "token", cost_usd: 0.000002 },
@@ -60,8 +62,9 @@ const GEMINI_3_PRO_IMAGE_PREVIEW_AI_STUDIO: EndpointEntry = {
   ],
 };
 
-const GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO: EndpointEntry = {
-  provider_name: "Google AI Studio",
+const GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO: Model = {
+  modelId: "google/gemini-3.1-flash-lite-image",
+  provider: "Google AI Studio",
   supported_parameters: {},
   pricing: [{ billable: "output_image", unit: "token", cost_usd: 0.00003 }],
 };
@@ -84,7 +87,7 @@ const observations: RealObservation[] = [
       // length, so a synthetic string of the same length stands in.
       promptText: "A".repeat(865),
     },
-    endpoint: GEMINI_3_PRO_IMAGE_PREVIEW_AI_STUDIO,
+    model: GEMINI_3_PRO_IMAGE_PREVIEW_AI_STUDIO,
     apiUsage: {
       tokens_prompt: 220,
       tokens_completion: 337,
@@ -123,7 +126,7 @@ const observations: RealObservation[] = [
       // chroma-key clause (262 chars) — 585 chars total.
       promptText: "A".repeat(585),
     },
-    endpoint: GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO,
+    model: GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO,
     apiUsage: {
       tokens_prompt: 116,
       tokens_completion: 1120,
@@ -149,8 +152,8 @@ const observations: RealObservation[] = [
 describe("image cost estimate calibration", () => {
   for (const obs of observations) {
     it(`${obs.description}: estimate is within ${COST_TOLERANCE * 100}% of the expected $${obs.expectedEstimatedCost.toFixed(4)}`, () => {
-      const estimate = estimateCost(obs.endpoint, obs.requirements);
-      expect(estimate, "estimateCost() returned null (no output_image pricing line found on the test endpoint)").not.toBeNull();
+      const estimate = estimateCost(obs.model, obs.requirements);
+      expect(estimate, "estimateCost() returned null (no output_image pricing line found on the test model)").not.toBeNull();
 
       const estimatedUsd = estimate!.usd;
       const error = Math.abs(estimatedUsd - obs.expectedEstimatedCost) / obs.expectedEstimatedCost;
