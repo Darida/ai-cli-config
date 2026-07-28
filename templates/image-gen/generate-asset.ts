@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,35 +38,6 @@ const CHROMA_KEY_BACKGROUND_CLAUSE =
 // this package) still does something sensible.
 function callerCwd(): string {
   return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
-}
-
-// `git -C <callerCwd()> config --get` — resolves against whichever
-// directory the caller actually invoked this from (git itself walks up
-// from there to find the nearest repo), never this template's own
-// location. That means the key must be configured in whichever repo the
-// caller happens to be running from — could be the calling project's own
-// repo, could be an outer workspace root, whatever that directory's git
-// considers "the repo" — this file has no opinion on workspace layout at
-// all. Fails loudly if unset rather than searching anywhere else.
-function readGitConfigKey(configKey: string): string {
-  let key: string;
-  try {
-    key = execFileSync("git", ["-C", callerCwd(), "config", "--get", configKey], { encoding: "utf8" }).trim();
-  } catch {
-    throw new Error(
-      `git config ${configKey} is not set in the git repo containing ${callerCwd()}. ` +
-        `Run this from inside the repo that has it configured, or set it here: ` +
-        `git config --local ${configKey} 'YOUR_KEY_HERE'`,
-    );
-  }
-  if (!key) {
-    throw new Error(`git config ${configKey} is set but empty in the git repo containing ${callerCwd()}.`);
-  }
-  return key;
-}
-
-function readOpenRouterApiKey(): string {
-  return readGitConfigKey("openrouter.imagenapikey");
 }
 
 function buildPromptText(promptText: string, needsChromaKey: boolean): string {
@@ -154,8 +124,14 @@ async function generateImageOpenRouter(requirements: ImageGenerationRequirements
 
 const MIN_RESOLUTIONS = ["0.5K", "1K", "2K", "4K"] as const;
 
-function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceResolution?: ImageGenerationRequirements["minResolution"] } {
+function parseArgs(argv: string[]): {
+  assetsDir: string;
+  assetId: string;
+  key: string;
+  forceResolution?: ImageGenerationRequirements["minResolution"];
+} {
   let assetsDir: string | undefined;
+  let key: string | undefined;
   let forceResolution: ImageGenerationRequirements["minResolution"] | undefined;
   const positional: string[] = [];
 
@@ -163,6 +139,8 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
     const arg = argv[i];
     if (arg === "--assets-dir") {
       assetsDir = argv[++i];
+    } else if (arg.startsWith("--key=")) {
+      key = arg.slice("--key=".length);
     } else if (arg === "--force-resolution") {
       const value = argv[++i];
       if (!MIN_RESOLUTIONS.includes(value as ImageGenerationRequirements["minResolution"])) {
@@ -175,15 +153,17 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
   }
 
   const assetId = positional[0];
-  if (!assetsDir || !assetId) {
+  if (!assetsDir || !key || !assetId) {
     throw new Error(
-      "Usage: generate-asset --assets-dir <path> [--force-resolution <0.5K|1K|2K|4K>] <asset-id>\n" +
+      "Usage: generate-asset --assets-dir <path> --key=<openrouter-api-key> [--force-resolution <0.5K|1K|2K|4K>] <asset-id>\n" +
         "  --assets-dir   required. Directory containing <asset-id>.json + <asset-id>.prompt.txt, " +
         "resolved relative to the current directory.\n" +
+        "  --key   required. OpenRouter API key for the Images API request. This file has no " +
+        "opinion on where that key comes from — the bin/generate-asset shim resolves it from " +
+        "`git config openrouter.imagenapikey` and passes it here; call this file directly " +
+        "(bypassing the shim) to supply one another way.\n" +
         "  --force-resolution   optional. Overrides every asset's own minResolution for this run " +
         "(e.g. while iterating on prompts/layout, to keep requests cheap) without editing its spec.\n" +
-        "Model selection needs an OpenRouter API key: git config openrouter.imagenapikey, read from " +
-        "whichever repo the current directory is inside (see readGitConfigKey).\n" +
         "To re-tune CHROMA_KEY_* constants against an already-generated raw without spending on a " +
         "fresh generation, use `./clean-image --input=<destination>.raw --output=<destination>` " +
         "instead — only works if this asset's generation actually needed chroma-key cleanup in the " +
@@ -192,11 +172,11 @@ function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceR
     );
   }
 
-  return { assetsDir: resolve(callerCwd(), assetsDir), assetId, forceResolution };
+  return { assetsDir: resolve(callerCwd(), assetsDir), assetId, key, forceResolution };
 }
 
 async function main() {
-  const { assetsDir, assetId, forceResolution } = parseArgs(process.argv.slice(2));
+  const { assetsDir, assetId, key, forceResolution } = parseArgs(process.argv.slice(2));
 
   const requirements = await readImageGenerationRequirements(assetsDir, assetId);
   if (forceResolution) {
@@ -204,7 +184,7 @@ async function main() {
   }
   const destination = resolve(callerCwd(), requirements.destination);
 
-  const result = await generateImageOpenRouter(requirements, readOpenRouterApiKey());
+  const result = await generateImageOpenRouter(requirements, key);
   const { bytes: rawBytes, needsChromaKey } = result;
 
   let imageBytes: Buffer;

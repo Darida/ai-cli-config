@@ -65,16 +65,22 @@ that cwd, and so does the OpenRouter API key lookup (see Auth below).
 ## Auth
 
 `generate-asset` needs an OpenRouter API key: `git config
-openrouter.imagenapikey`. Looked up via plain `git config --get` — no
-explicit repo path — so it resolves against whatever repo the *calling*
-directory happens to be inside (git itself walks up from cwd to find the
-nearest `.git`, exactly like any other git command). This package has no
-opinion on workspace layout: run it from a plain standalone repo, a
+openrouter.imagenapikey`. **The `bin/generate-asset` shim is the only
+thing in this package that knows anything about git** — it resolves the
+key via `git -C <caller-dir> config --get openrouter.imagenapikey`
+(caller's directory, not this package's own — git itself walks up from
+there to find the nearest `.git`, exactly like any other git command) and
+passes it to `generate-asset.ts` as a plain `--key=<value>` flag.
+`generate-asset.ts` itself has no git/config knowledge at all — it just
+takes whatever `--key` value it's given and uses it. This package has no
+opinion on workspace layout: run the shim from a plain standalone repo, a
 submodule, or an outer workspace root that holds the key on behalf of
-several submodules — whichever repo your cwd is inside when you invoke
-the shim is where the key must be configured. Fails loudly, with the
-directory it looked in, if it's unset — never searches anywhere else or
-falls back to a default.
+several submodules — whichever repo your cwd is inside when you invoke it
+is where the key must be configured. Fails loudly, with the directory it
+looked in, if it's unset — never searches anywhere else or falls back to
+a default. (`list-image-models`/`pick-image-model` never need a key at
+all — OpenRouter's model/endpoint discovery endpoints they call are
+unauthenticated.)
 
 ## Model selection
 

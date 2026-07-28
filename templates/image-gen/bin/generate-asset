@@ -11,12 +11,22 @@
 # flag and the script path from argv when reconstructing it for the
 # script's own process.argv, so any other vite-node flag like --root leaks
 # straight through into the script's own arguments). But the *caller's*
-# directory is what --assets-dir and the OpenRouter API key lookup
-# (readGitConfigKey/callerCwd() in generate-asset.ts) need to resolve
-# against. Those two requirements conflict on a single process.cwd() — so
-# this captures the caller's real directory into IMAGE_GEN_CALLER_CWD
-# before `cd`-ing here, and generate-asset.ts reads that env var instead of
-# raw process.cwd() wherever the *caller's* directory is what's meant.
+# directory is what --assets-dir needs to resolve against, and it's also
+# where this shim looks up the OpenRouter API key (see below). Those
+# requirements conflict on a single process.cwd() — so this captures the
+# caller's real directory into IMAGE_GEN_CALLER_CWD before `cd`-ing here,
+# and generate-asset.ts reads that env var instead of raw process.cwd()
+# wherever the *caller's* directory is what's meant.
+#
+# This shim is the only thing in this package that knows about git at
+# all: it resolves the OpenRouter API key from `git config
+# openrouter.imagenapikey`, read in whichever repo the caller's directory
+# is actually inside (git itself walks up from there to find the nearest
+# .git — could be the calling project's own repo, could be an outer
+# workspace root, whatever that directory's git considers "the repo").
+# generate-asset.ts itself has no git/config knowledge — it just takes
+# --key=<value> as a plain CLI flag and uses it as-is; run it directly
+# (bypassing this shim) to supply a key any other way.
 #
 # Lives in bin/, one level below the package itself, so its own filename
 # ("generate-asset") can never collide with generate-asset.ts's own module
@@ -29,5 +39,14 @@ set -euo pipefail
 BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PKG_DIR="$(cd "$BIN_DIR/.." && pwd)"
 export IMAGE_GEN_CALLER_CWD="$PWD"
+
+API_KEY="$(git -C "$IMAGE_GEN_CALLER_CWD" config --get openrouter.imagenapikey 2>/dev/null || true)"
+if [ -z "$API_KEY" ]; then
+    echo "git config openrouter.imagenapikey is not set in the git repo containing $IMAGE_GEN_CALLER_CWD." >&2
+    echo "Run this from inside the repo that has it configured, or set it here:" >&2
+    echo "  git config --local openrouter.imagenapikey 'YOUR_KEY_HERE'" >&2
+    exit 1
+fi
+
 cd "$PKG_DIR"
-exec "$PKG_DIR/node_modules/.bin/vite-node" --script "$PKG_DIR/generate-asset.ts" "$@"
+exec "$PKG_DIR/node_modules/.bin/vite-node" --script "$PKG_DIR/generate-asset.ts" --key="$API_KEY" "$@"
