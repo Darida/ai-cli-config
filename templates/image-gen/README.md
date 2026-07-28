@@ -8,7 +8,7 @@ wherever your project lives, e.g. from a project root that has this repo
 checked out as a sibling or submodule:
 
 ```
-../ai-cli-config/templates/image-gen/generate-asset --assets-dir src/assets/prompts building-arena
+../ai-cli-config/templates/image-gen/generate-asset --assets-dir "$(pwd)/src/assets/prompts" building-arena
 ```
 
 ## Setup (once per checkout)
@@ -26,41 +26,45 @@ to its own `package.json`.
 
 Each is a small bash shim (`generate-asset`, `list-image-models`,
 `pick-image-model`, `clean-image`) that resolves its own real location to
-find its `node_modules`/`.ts` file, but never `cd`s there — the actual
-Node process keeps running with whatever directory you invoked it from as
-its cwd. That matters for two things: `--assets-dir` resolves relative to
-that cwd, and so does the OpenRouter API key lookup (see Auth below).
+find its `node_modules`/`.ts` file, then `cd`s into this package's own
+directory before running (vite-node needs its real process cwd to be here
+to resolve native deps like `sharp` correctly). Because of that `cd`,
+**every path a tool takes as input (`--assets-dir`, `--input`, `--output`)
+must be an absolute path** — none of these tools do any relative-path
+resolution against "wherever you happened to be standing" when you
+invoked them.
 
-- **`./generate-asset --assets-dir <path> [--force-resolution <tier>] <asset-id>`**
+- **`./generate-asset --assets-dir <absolute-path> [--force-resolution <tier>] <asset-id>`**
   — the actual generator. Reads `<assets-dir>/<asset-id>.json` (spec) and
   `<assets-dir>/<asset-id>.prompt.txt` (prompt), picks a model (see Model
   selection), calls OpenRouter's Images API, and writes the result to
-  `destination` from the spec (resolved relative to cwd). `--force-
-  resolution` overrides every asset's own `minResolution` for that one
-  run without editing its spec — useful while iterating on prompts/layout
-  to keep requests cheap.
-- **`./clean-image --input=<path> --output=<path>`** — re-runs just the
-  chroma-key cleanup step (see Transparency) against an already-cached raw
-  file (typically `<destination>.raw` from a prior `generate-asset` run),
-  without calling any generation API again. Takes plain file paths, not
-  `--assets-dir`/asset id — no asset-spec/JSON knowledge involved. Free
-  and fully offline — no network calls at all — so it's safe to re-run
-  repeatedly while tuning the `CHROMA_KEY_*` constants at the top of
-  `clean-image.ts`. Fails if `--input` doesn't exist; a `.raw` file only
-  exists for an asset whose generation actually needed chroma-key cleanup
-  in the first place (see below) — there's nothing to re-clean for others.
-- **`./list-image-models --assets-dir <path> <asset-id>`** — human-facing
-  landscape view. Estimates a real dollar cost for every OpenRouter
-  Images API model/provider endpoint against that asset's actual spec +
-  prompt, prints everything sorted cheapest-first, plus a feature-support
-  tally and a bucket for endpoints with no published pricing (not free,
-  just unpriced — excluded from ranking but still shown). Doesn't filter
-  by feature support; for deciding selection criteria, not for automating
-  a pick.
-- **`./pick-image-model --assets-dir <path> <asset-id>`** — CLI preview of
-  the same selection algorithm `generate-asset` uses internally (see
-  `selectImageModel()` in `pick-image-model.ts`), without spending on an
-  actual generation.
+  `destination` from the spec (resolved relative to `assets-dir` — see
+  Input model below). `--force-resolution` overrides every asset's own
+  `minResolution` for that one run without editing its spec — useful
+  while iterating on prompts/layout to keep requests cheap.
+- **`./clean-image --input=<absolute-path> --output=<absolute-path>`** —
+  re-runs just the chroma-key cleanup step (see Transparency) against an
+  already-cached raw file (typically `<destination>.raw` from a prior
+  `generate-asset` run), without calling any generation API again. Takes
+  plain file paths, not `--assets-dir`/asset id — no asset-spec/JSON
+  knowledge involved. Free and fully offline — no network calls at all —
+  so it's safe to re-run repeatedly while tuning the `CHROMA_KEY_*`
+  constants at the top of `clean-image.ts`. Fails if `--input` doesn't
+  exist; a `.raw` file only exists for an asset whose generation actually
+  needed chroma-key cleanup in the first place (see below) — there's
+  nothing to re-clean for others.
+- **`./list-image-models --assets-dir <absolute-path> <asset-id>`** —
+  human-facing landscape view. Estimates a real dollar cost for every
+  OpenRouter Images API model/provider endpoint against that asset's
+  actual spec + prompt, prints everything sorted cheapest-first, plus a
+  feature-support tally and a bucket for endpoints with no published
+  pricing (not free, just unpriced — excluded from ranking but still
+  shown). Doesn't filter by feature support; for deciding selection
+  criteria, not for automating a pick.
+- **`./pick-image-model --assets-dir <absolute-path> <asset-id>`** — CLI
+  preview of the same selection algorithm `generate-asset` uses internally
+  (see `selectImageModel()` in `pick-image-model.ts`), without spending on
+  an actual generation.
 
 ## Auth
 
@@ -189,7 +193,9 @@ Each library function accepts that entity two ways:
 - **Folder + asset id** — `readImageGenerationRequirements(assetsDir,
   assetId)` parses it off disk (what every CLI's `main()` does): the id's
   `.json` file for the structural fields below, plus its `.prompt.txt` for
-  `promptText`.
+  `promptText`. `assetsDir` must be an absolute path — this function fails
+  loudly if it isn't, rather than guessing what a relative one would be
+  relative to.
 - **Already parsed, in memory** — pass the entity directly (what tests and
   other programmatic callers do), no filesystem access involved.
 
@@ -204,9 +210,11 @@ Each library function accepts that entity two ways:
 }
 ```
 
-- `destination` — output file path, resolved relative to the current
-  directory when `generate-asset` runs. Its extension is also the output
-  format (`.png`/`.jpg`/`.jpeg`).
+- `destination` — output file path, resolved relative to `--assets-dir`
+  (the directory containing this JSON file itself), not to any caller
+  context — `readImageGenerationRequirements` resolves it to an absolute
+  path immediately when parsing. Its extension is also the output format
+  (`.png`/`.jpg`/`.jpeg`).
 - `aspectRatio` — optional; one of `1:1`, `3:2`, `2:3`, `3:4`, `4:3`,
   `4:5`, `5:4`, `9:16`, `16:9`, `21:9`. Omit when no aspect ratio actually
   matters for the asset (CSS force-stretches it regardless, or too few

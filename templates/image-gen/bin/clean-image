@@ -1,9 +1,10 @@
 #!/bin/bash
-# See ./generate-asset for why this captures IMAGE_GEN_CALLER_CWD and cds
-# into the package dir, why it lives in bin/, and why --root is NOT passed.
+# See ./generate-asset for why this cds into the package dir (vite-node
+# needs its real process cwd to be here to resolve deps like sharp), why
+# it lives in bin/, and why --root is NOT passed. --input/--output must be
+# absolute — no caller-cwd bridging needed here at all.
 set -euo pipefail
 BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PKG_DIR="$(cd "$BIN_DIR/.." && pwd)"
-export IMAGE_GEN_CALLER_CWD="$PWD"
 cd "$PKG_DIR"
 exec "$PKG_DIR/node_modules/.bin/vite-node" --script "$PKG_DIR/clean-image.ts" "$@"

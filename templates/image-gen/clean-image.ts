@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
@@ -70,12 +70,15 @@ export async function cleanImage(rawBytes: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-// The caller's actual directory, not this process's real cwd — see
-// bin/clean-image's own comment for why the two differ (vite-node needs
-// real cwd to be this package's own directory to resolve dependencies
-// correctly) and how IMAGE_GEN_CALLER_CWD bridges that.
-function callerCwd(): string {
-  return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
+// No relative-path resolution against "wherever the caller happened to be
+// standing" here (unlike vite-node's own real process cwd, which the bin/
+// clean-image shim still has to cd into a package's own directory to
+// resolve dependencies correctly) — --input/--output must already be
+// absolute. Fails loudly rather than guessing what they're relative to.
+function requireAbsolutePath(flagName: string, value: string): void {
+  if (!isAbsolute(value)) {
+    throw new Error(`${flagName} must be an absolute path, got "${value}"`);
+  }
 }
 
 function parseArgs(argv: string[]): { input: string; output: string } {
@@ -92,21 +95,21 @@ function parseArgs(argv: string[]): { input: string; output: string } {
 
   if (!input || !output) {
     throw new Error(
-      "Usage: clean-image --input=<path> --output=<path>\n" +
+      "Usage: clean-image --input=<absolute-path> --output=<absolute-path>\n" +
         "Applies chroma-key cleanup to the raw image at --input and writes the result to " +
-        "--output (both resolved relative to the current directory). No asset-spec/JSON " +
-        "involved — just two file paths. Free and offline: no network calls, no API cost, " +
-        "safe to re-run while tuning CHROMA_KEY_* above.",
+        "--output. Both must be absolute paths. No asset-spec/JSON involved — just two file " +
+        "paths. Free and offline: no network calls, no API cost, safe to re-run while tuning " +
+        "CHROMA_KEY_* above.",
     );
   }
 
+  requireAbsolutePath("--input", input);
+  requireAbsolutePath("--output", output);
   return { input, output };
 }
 
 async function main() {
-  const { input, output } = parseArgs(process.argv.slice(2));
-  const inputPath = resolve(callerCwd(), input);
-  const outputPath = resolve(callerCwd(), output);
+  const { input: inputPath, output: outputPath } = parseArgs(process.argv.slice(2));
 
   const rawBytes = await readFile(inputPath);
   const imageBytes = await cleanImage(rawBytes);

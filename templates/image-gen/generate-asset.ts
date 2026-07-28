@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve } from "node:path";
+import { dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { cleanImage } from "./clean-image";
@@ -28,17 +28,6 @@ const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images";
 // support it.
 const CHROMA_KEY_BACKGROUND_CLAUSE =
   ", the entire area meant to end up transparent — including the background behind the subject and any fully enclosed hollow regions within it — rendered as flat solid magenta (#FF00FF) with no gradient or texture; magenta must not appear anywhere else in the image";
-
-// The caller's actual directory, not this process's real cwd. The bin/*
-// shims `cd` into this package's own directory before running (vite-node
-// needs that to resolve its own dependencies correctly — see bin/
-// generate-asset's own comment), capturing where the caller really was
-// into IMAGE_GEN_CALLER_CWD first. Falls back to process.cwd() so running
-// this file directly (bypassing the shim, e.g. via `npm run` from within
-// this package) still does something sensible.
-function callerCwd(): string {
-  return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
-}
 
 function buildPromptText(promptText: string, needsChromaKey: boolean): string {
   return needsChromaKey ? promptText + CHROMA_KEY_BACKGROUND_CLAUSE : promptText;
@@ -155,9 +144,10 @@ function parseArgs(argv: string[]): {
   const assetId = positional[0];
   if (!assetsDir || !key || !assetId) {
     throw new Error(
-      "Usage: generate-asset --assets-dir <path> --key=<openrouter-api-key> [--force-resolution <0.5K|1K|2K|4K>] <asset-id>\n" +
-        "  --assets-dir   required. Directory containing <asset-id>.json + <asset-id>.prompt.txt, " +
-        "resolved relative to the current directory.\n" +
+      "Usage: generate-asset --assets-dir <absolute-path> --key=<openrouter-api-key> [--force-resolution <0.5K|1K|2K|4K>] <asset-id>\n" +
+        "  --assets-dir   required. Absolute path to the directory containing <asset-id>.json + " +
+        "<asset-id>.prompt.txt — must be absolute, this file does no relative-path resolution at " +
+        "all (see readImageGenerationRequirements).\n" +
         "  --key   required. OpenRouter API key for the Images API request. This file has no " +
         "opinion on where that key comes from — the bin/generate-asset shim resolves it from " +
         "`git config openrouter.imagenapikey` and passes it here; call this file directly " +
@@ -172,7 +162,7 @@ function parseArgs(argv: string[]): {
     );
   }
 
-  return { assetsDir: resolve(callerCwd(), assetsDir), assetId, key, forceResolution };
+  return { assetsDir, assetId, key, forceResolution };
 }
 
 async function main() {
@@ -182,7 +172,7 @@ async function main() {
   if (forceResolution) {
     requirements.minResolution = forceResolution;
   }
-  const destination = resolve(callerCwd(), requirements.destination);
+  const destination = requirements.destination; // already absolute — resolved by readImageGenerationRequirements
 
   const result = await generateImageOpenRouter(requirements, key);
   const { bytes: rawBytes, needsChromaKey } = result;

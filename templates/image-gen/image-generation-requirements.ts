@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 // The one shared input model for every tool in this package (generate-
 // asset, pick-image-model, list-image-models, image-cost-estimate) — what
@@ -17,7 +17,11 @@ import { resolve } from "node:path";
 // legible on its own, instead of every wording tweak burying config
 // history in noise and vice versa.
 export interface AssetSpec {
-  destination: string; // output file path, relative to the caller's directory — its extension is also the output format
+  // Output file path, relative to the directory containing this asset's
+  // own .json/.prompt.txt files (assetsDir) — resolved to an absolute path
+  // by readImageGenerationRequirements below. Its extension is also the
+  // output format.
+  destination: string;
   aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
   minResolution: "0.5K" | "1K" | "2K" | "4K"; // a floor, not an exact request — more resolution is always fine
   background: "transparent" | "opaque";
@@ -32,8 +36,22 @@ export interface ImageGenerationRequirements extends AssetSpec {
   promptText: string;
 }
 
+// No tool in this package resolves a relative path against "wherever the
+// caller happened to be standing" — that used to be done via an
+// IMAGE_GEN_CALLER_CWD env var bridged in from the bin/* shims, which
+// broke down as soon as vite-node needed the real process cwd to be this
+// package's own directory (for dependency resolution) at the same time.
+// Simpler and unambiguous: every directory a caller passes in must already
+// be absolute. Fails loudly rather than guessing.
+function requireAbsolutePath(flagName: string, value: string): void {
+  if (!isAbsolute(value)) {
+    throw new Error(`${flagName} must be an absolute path, got "${value}"`);
+  }
+}
+
 export async function readImageGenerationRequirements(assetsDir: string, assetId: string): Promise<ImageGenerationRequirements> {
+  requireAbsolutePath("assets directory", assetsDir);
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
   const promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
-  return { ...spec, promptText };
+  return { ...spec, destination: resolve(assetsDir, spec.destination), promptText };
 }

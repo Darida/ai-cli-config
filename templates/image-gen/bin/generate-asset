@@ -10,13 +10,11 @@
 # problem: vite-node's --script mode only strips the literal "--script"
 # flag and the script path from argv when reconstructing it for the
 # script's own process.argv, so any other vite-node flag like --root leaks
-# straight through into the script's own arguments). But the *caller's*
-# directory is what --assets-dir needs to resolve against, and it's also
-# where this shim looks up the OpenRouter API key (see below). Those
-# requirements conflict on a single process.cwd() — so this captures the
-# caller's real directory into IMAGE_GEN_CALLER_CWD before `cd`-ing here,
-# and generate-asset.ts reads that env var instead of raw process.cwd()
-# wherever the *caller's* directory is what's meant.
+# straight through into the script's own arguments). generate-asset.ts
+# itself takes no relative paths at all (--assets-dir must be absolute —
+# the caller resolves it before invoking this), so the only reason this
+# still captures $PWD below is for this shim's own git lookup, not to
+# bridge anything into the .ts process.
 #
 # This shim is the only thing in this package that knows about git at
 # all: it resolves the OpenRouter API key from `git config
@@ -38,11 +36,11 @@
 set -euo pipefail
 BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 PKG_DIR="$(cd "$BIN_DIR/.." && pwd)"
-export IMAGE_GEN_CALLER_CWD="$PWD"
+CALLER_CWD="$PWD"
 
-API_KEY="$(git -C "$IMAGE_GEN_CALLER_CWD" config --get openrouter.imagenapikey 2>/dev/null || true)"
+API_KEY="$(git -C "$CALLER_CWD" config --get openrouter.imagenapikey 2>/dev/null || true)"
 if [ -z "$API_KEY" ]; then
-    echo "git config openrouter.imagenapikey is not set in the git repo containing $IMAGE_GEN_CALLER_CWD." >&2
+    echo "git config openrouter.imagenapikey is not set in the git repo containing $CALLER_CWD." >&2
     echo "Run this from inside the repo that has it configured, or set it here:" >&2
     echo "  git config --local openrouter.imagenapikey 'YOUR_KEY_HERE'" >&2
     exit 1

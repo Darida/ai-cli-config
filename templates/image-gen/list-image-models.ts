@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type CostEstimate, type EndpointEntry, type ParamSpec, estimateCost, estimateTokens, tierMegapixels } from "./image-cost-estimate";
 import { type ImageGenerationRequirements, readImageGenerationRequirements } from "./image-generation-requirements";
@@ -15,14 +14,6 @@ import { fetchEndpoints, fetchModelList } from "./openrouter-images-api";
 // checks against real recorded generations — this file is just the CLI:
 // fetch, run the estimate, print. See pick-image-model.ts for the
 // filtered/automated-selection version of this same data.
-
-// The caller's actual directory, not this process's real cwd — see
-// bin/list-image-models's own comment for why the two differ (vite-node
-// needs real cwd to be this package's own directory to resolve
-// dependencies correctly) and how IMAGE_GEN_CALLER_CWD bridges that.
-function callerCwd(): string {
-  return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
-}
 
 // Prints how many of the given endpoints declare support for each
 // parameter/value — a landscape overview to inform filtering criteria,
@@ -125,11 +116,10 @@ async function main() {
   const assetId = positional[0];
 
   if (!assetsDir || !assetId) {
-    throw new Error("Usage: list-image-models --assets-dir <path> <asset-id>  (e.g. building-arena)");
+    throw new Error("Usage: list-image-models --assets-dir <absolute-path> <asset-id>  (e.g. building-arena)");
   }
 
-  const resolvedAssetsDir = resolve(callerCwd(), assetsDir);
-  const requirements = await readImageGenerationRequirements(resolvedAssetsDir, assetId);
+  const requirements = await readImageGenerationRequirements(assetsDir, assetId);
   const promptTokens = estimateTokens(requirements.promptText);
 
   const { models, endpoints, complete, partial, missingPricing } = await listModelCosts(requirements);

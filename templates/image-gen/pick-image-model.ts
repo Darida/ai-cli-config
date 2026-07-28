@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type EndpointEntry, estimateCost, supportsAspectRatio, supportsBackground, supportsMinResolution } from "./image-cost-estimate";
 import { type ImageGenerationRequirements, readImageGenerationRequirements } from "./image-generation-requirements";
@@ -108,14 +107,6 @@ export async function selectImageModel(requirements: ImageGenerationRequirements
   };
 }
 
-// The caller's actual directory, not this process's real cwd — see
-// bin/pick-image-model's own comment for why the two differ (vite-node
-// needs real cwd to be this package's own directory to resolve
-// dependencies correctly) and how IMAGE_GEN_CALLER_CWD bridges that.
-function callerCwd(): string {
-  return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
-}
-
 async function main() {
   const args = process.argv.slice(2);
   let assetsDir: string | undefined;
@@ -130,11 +121,10 @@ async function main() {
   const assetId = positional[0];
 
   if (!assetsDir || !assetId) {
-    throw new Error("Usage: pick-image-model --assets-dir <path> <asset-id>  (e.g. building-arena)");
+    throw new Error("Usage: pick-image-model --assets-dir <absolute-path> <asset-id>  (e.g. building-arena)");
   }
 
-  const resolvedAssetsDir = resolve(callerCwd(), assetsDir);
-  const requirements = await readImageGenerationRequirements(resolvedAssetsDir, assetId);
+  const requirements = await readImageGenerationRequirements(assetsDir, assetId);
 
   const selection = await selectImageModel(requirements);
   const { picked, pool } = selection;
