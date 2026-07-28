@@ -1,12 +1,12 @@
 # AI Work Approval Pipeline
 
-A streamlined automation script (`approve-ai-work.sh`) designed to clean up, summarize, review, and merge AI-generated code changes from `ai-work` branch into `main`. It uses the Gemini CLI to generate professional PR summaries from your git diffs, squash-merges the work, and resets your working branch for the next task.
+A streamlined automation script (`approve-ai-work.sh`) designed to clean up, summarize, review, and merge AI-generated code changes from `ai-work` branch into `main`. It calls an LLM to generate professional PR summaries from your git diffs, squash-merges the work, and resets your working branch for the next task.
 
 ## Workflow Steps
 
 1. **Validation & Sync Check:** Verifies that your working tree has no uncommitted changes and that `ai-work` hasn't diverged from `main`.
 2. **PR Cleanup:** Automatically closes any stale, open PRs from the `ai-work` branch.
-3. **AI Summarization:** Grabs the `git diff` (excluding `go.sum`), injects it into `approve-ai-work.commit_description_promt.md`, and pipes it into the Gemini CLI to write a clean title and description.
+3. **AI Summarization:** Grabs the `git diff` (excluding `go.sum`), injects it into `approve-ai-work.commit_description_promt.md`, and sends it to OpenRouter (`openrouter/auto`) by default — or Gemini directly if `--gemini` is passed — to write a clean title and description.
 4. **Human-in-the-Loop Review:** Displays the generated PR title and description, then pauses to wait for your manual approval (`y/n`).
 5. **Automated Squash Merge:** Uses the GitHub CLI (`gh`) to create the PR, approve it, and squash-merge it into `main`.
 6. **Branch Reset:** Pulls the updated `main` branch, hard-resets local and remote `ai-work` history, and leaves you with a clean slate for the next task.
@@ -16,7 +16,8 @@ A streamlined automation script (`approve-ai-work.sh`) designed to clean up, sum
 After your AI agent finishes a task on the `ai-work` branch, preview diff in GitHub Web UI, then run:
 
 ```bash
-./approve-ai-work.sh
+./approve-ai-work.sh          # default: OpenRouter (openrouter/auto), key from `git config openrouter.githubapikey`
+./approve-ai-work.sh --gemini # calls the Gemini API directly instead, key from `git config gemini.apikey`
 ```
 
 ## Multi-repo workspaces: approve-all-ai-work.sh
@@ -47,15 +48,19 @@ across all of them in one go instead of `cd`-ing into each one by hand.
    at least one pointer-bump commit. The step 2 check that decided
    whether to skip it entirely already ruled out the only case where it
    wouldn't need approving.
-5. One `gemini.apikey`, read from the workspace root's own local git
-   config (`git config --local gemini.apikey '...'`, set once there) — no
-   per-repo config, no fallback chain. Read once and passed in explicitly
-   to every repo, rather than letting `approve-ai-work.sh` re-derive it
-   itself from whatever directory happens to be current. Stops with a
-   clear message if the workspace root has no key set.
+5. One key, read from the workspace root's own local git config — no
+   per-repo config, no fallback chain. Which key depends on whether
+   `--gemini` was passed to `approve-all-ai-work.sh` itself: default is
+   `openrouter.githubapikey`, `--gemini` reads `gemini.apikey` instead.
+   Read once and passed in explicitly to every repo (along with any
+   `--gemini` flag, forwarded through), rather than letting
+   `approve-ai-work.sh` re-derive it itself from whatever directory
+   happens to be current. Stops with a clear message if the workspace
+   root has no key set for whichever provider was selected.
 
 ```bash
-./approve-all-ai-work.sh
+./approve-all-ai-work.sh          # default: OpenRouter
+./approve-all-ai-work.sh --gemini # Gemini directly, for every repo
 ```
 
 Run from anywhere — it locates the workspace root relative to its own
