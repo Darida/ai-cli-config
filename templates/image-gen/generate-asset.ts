@@ -1,0 +1,266 @@
+import { execFileSync } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, extname, resolve } from "node:path";
+import sharp from "sharp";
+import { cleanImage } from "./clean-image";
+import { estimateTokens, pickResolutionValue, supportsBackground } from "./image-cost-estimate";
+import { fetchEndpoints } from "./openrouter-images-api";
+import { selectImageModel } from "./pick-image-model";
+
+// One asset spec == one <id>.json + one <id>.prompt.txt, both in whatever
+// directory --assets-dir points at (a project's own asset-prompt folder —
+// nothing in this file is specific to any one project). The JSON is our
+// own provider-agnostic vocabulary — aspectRatio/minResolution/background
+// all map directly onto OpenRouter's Images API request fields (see
+// generateImageOpenRouter below).
+interface AssetSpec {
+  destination: string; // output file path, relative to the caller's directory (see callerCwd()) — its extension is also the output format
+  // Omitted when no aspect ratio actually matters for a given asset.
+  aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
+  // A floor, not an exact request — more resolution is always fine, we
+  // just don't want less. See resolveOpenRouterModel()/pickResolutionValue
+  // for how a real per-model resolution value gets picked from this.
+  minResolution: "0.5K" | "1K" | "2K" | "4K";
+  // Passed as OpenRouter's own `background` request field when the model
+  // picked for this run declares support for it; otherwise the chroma-key
+  // workaround (see clean-image.ts) applies instead.
+  background: "transparent" | "opaque";
+}
+
+// OpenRouter's dedicated, provider-normalized Images API (not the general
+// chat-completions endpoint) — this is what actually exposes resolution/
+// aspect_ratio/background as request fields. No auto-router exists on this
+// API (unlike chat-completions' "openrouter/auto"), so
+// resolveOpenRouterModel() below picks a concrete model per request.
+const OPENROUTER_IMAGES_URL = "https://openrouter.ai/api/v1/images";
+
+// Chroma-key cleanup itself lives in clean-image.ts (both as a library
+// function this file calls, and as its own standalone script — `./clean-
+// image <asset-id>` — for re-tuning its constants against an already-
+// cached raw without spending on a fresh generation). This file only owns
+// the *prompt-side* half of the workaround: asking the model for a flat
+// magenta background to key out, via CHROMA_KEY_BACKGROUND_CLAUSE below.
+// OpenRouter's Images API supports a real `background: "transparent"`
+// request field, but only some of its underlying models declare it —
+// resolveOpenRouterModel() checks the specific model picked for this run
+// and only falls back to the clause below when that model doesn't
+// support it.
+const CHROMA_KEY_BACKGROUND_CLAUSE =
+  ", the entire area meant to end up transparent — including the background behind the subject and any fully enclosed hollow regions within it — rendered as flat solid magenta (#FF00FF) with no gradient or texture; magenta must not appear anywhere else in the image";
+
+// The caller's actual directory, not this process's real cwd. The bin/*
+// shims `cd` into this package's own directory before running (vite-node
+// needs that to resolve its own dependencies correctly — see bin/
+// generate-asset's own comment), capturing where the caller really was
+// into IMAGE_GEN_CALLER_CWD first. Falls back to process.cwd() so running
+// this file directly (bypassing the shim, e.g. via `npm run` from within
+// this package) still does something sensible.
+function callerCwd(): string {
+  return process.env.IMAGE_GEN_CALLER_CWD ?? process.cwd();
+}
+
+// `git -C <callerCwd()> config --get` — resolves against whichever
+// directory the caller actually invoked this from (git itself walks up
+// from there to find the nearest repo), never this template's own
+// location. That means the key must be configured in whichever repo the
+// caller happens to be running from — could be the calling project's own
+// repo, could be an outer workspace root, whatever that directory's git
+// considers "the repo" — this file has no opinion on workspace layout at
+// all. Fails loudly if unset rather than searching anywhere else.
+function readGitConfigKey(configKey: string): string {
+  let key: string;
+  try {
+    key = execFileSync("git", ["-C", callerCwd(), "config", "--get", configKey], { encoding: "utf8" }).trim();
+  } catch {
+    throw new Error(
+      `git config ${configKey} is not set in the git repo containing ${callerCwd()}. ` +
+        `Run this from inside the repo that has it configured, or set it here: ` +
+        `git config --local ${configKey} 'YOUR_KEY_HERE'`,
+    );
+  }
+  if (!key) {
+    throw new Error(`git config ${configKey} is set but empty in the git repo containing ${callerCwd()}.`);
+  }
+  return key;
+}
+
+function readOpenRouterApiKey(): string {
+  return readGitConfigKey("openrouter.imagenapikey");
+}
+
+async function readSpec(assetsDir: string, assetId: string): Promise<AssetSpec> {
+  const raw = await readFile(resolve(assetsDir, `${assetId}.json`), "utf8");
+  return JSON.parse(raw) as AssetSpec;
+}
+
+async function readPromptText(assetsDir: string, assetId: string): Promise<string> {
+  return (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
+}
+
+function buildPromptText(promptText: string, needsChromaKey: boolean): string {
+  return needsChromaKey ? promptText + CHROMA_KEY_BACKGROUND_CLAUSE : promptText;
+}
+
+function outputFormat(destination: string): "png" | "jpeg" {
+  const ext = extname(destination);
+  if (ext === ".png") return "png";
+  if (ext === ".jpg" || ext === ".jpeg") return "jpeg";
+  throw new Error(`Unsupported destination extension for output format: ${ext}`);
+}
+
+// Runs selectImageModel()'s filter/price/percentile pick (see
+// pick-image-model.ts), then re-fetches that specific model's endpoints
+// directly (rather than trusting the bulk-list data selectImageModel
+// already had) to check transparent-background support and pick a real
+// resolution value right at the point they're used.
+async function resolveOpenRouterModel(
+  spec: AssetSpec,
+  promptText: string,
+): Promise<{ modelId: string; provider: string; needsChromaKey: boolean; resolutionValue: string | undefined }> {
+  const promptTokens = estimateTokens(promptText);
+  const { picked, pool } = await selectImageModel(spec, promptTokens);
+
+  const endpoints = await fetchEndpoints(picked.modelId);
+  const matchingEndpoint = endpoints.find((e) => e.provider_name === picked.provider) ?? picked.endpoint;
+  const supportsTransparent = supportsBackground(matchingEndpoint.supported_parameters, "transparent");
+  const needsChromaKey = spec.background === "transparent" && !supportsTransparent;
+  // supportsMinResolution() (already applied by selectImageModel) only
+  // guarantees *some* declared value meets the floor — never assume our
+  // own "0.5K"/"512" shape is literally one of this model's declared
+  // values. Pick the cheapest one that actually is; undefined (field
+  // omitted from the request) when the model declares no resolution
+  // parameter at all.
+  const resolutionValue = pickResolutionValue(matchingEndpoint.supported_parameters, spec.minResolution);
+
+  console.log(
+    `OpenRouter model: ${picked.modelId} (${picked.provider}) — $${picked.usd.toFixed(4)} estimated, ` +
+      `chosen from ${pool.length} candidates at/under the 30th-percentile+10% price threshold. ` +
+      `Native transparent background: ${supportsTransparent ? "yes" : "no — using chroma-key cleanup"}. ` +
+      `Resolution requested: ${resolutionValue ?? "(model declares no resolution parameter — omitted)"}.`,
+  );
+
+  return { modelId: picked.modelId, provider: picked.provider, needsChromaKey, resolutionValue };
+}
+
+async function generateImageOpenRouter(promptText: string, spec: AssetSpec, apiKey: string): Promise<{ bytes: Buffer; needsChromaKey: boolean }> {
+  const { modelId, needsChromaKey, resolutionValue } = await resolveOpenRouterModel(spec, promptText);
+
+  const body = {
+    model: modelId,
+    prompt: buildPromptText(promptText, needsChromaKey),
+    resolution: resolutionValue,
+    aspect_ratio: spec.aspectRatio,
+    // Only pass "transparent" when the picked model actually declares
+    // support for it — an unsupported enum value risks a request-time
+    // rejection from providers that validate strictly. When it doesn't,
+    // the chroma-key clause above stands in for the request instead.
+    background: needsChromaKey ? undefined : spec.background,
+    output_format: outputFormat(spec.destination),
+  };
+
+  const response = await fetch(OPENROUTER_IMAGES_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter request failed: ${response.status} ${response.statusText}\n${await response.text()}`);
+  }
+
+  const result = await response.json();
+  const b64Json: string | undefined = result.data?.[0]?.b64_json;
+
+  if (!b64Json) {
+    throw new Error(`OpenRouter response had no image content:\n${JSON.stringify(result, null, 2)}`);
+  }
+
+  return { bytes: Buffer.from(b64Json, "base64"), needsChromaKey };
+}
+
+const MIN_RESOLUTIONS = ["0.5K", "1K", "2K", "4K"] as const;
+
+function parseArgs(argv: string[]): { assetsDir: string; assetId: string; forceResolution?: AssetSpec["minResolution"] } {
+  let assetsDir: string | undefined;
+  let forceResolution: AssetSpec["minResolution"] | undefined;
+  const positional: string[] = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--assets-dir") {
+      assetsDir = argv[++i];
+    } else if (arg === "--force-resolution") {
+      const value = argv[++i];
+      if (!MIN_RESOLUTIONS.includes(value as AssetSpec["minResolution"])) {
+        throw new Error(`--force-resolution must be one of ${MIN_RESOLUTIONS.join(", ")}, got "${value}"`);
+      }
+      forceResolution = value as AssetSpec["minResolution"];
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  const assetId = positional[0];
+  if (!assetsDir || !assetId) {
+    throw new Error(
+      "Usage: generate-asset --assets-dir <path> [--force-resolution <0.5K|1K|2K|4K>] <asset-id>\n" +
+        "  --assets-dir   required. Directory containing <asset-id>.json + <asset-id>.prompt.txt, " +
+        "resolved relative to the current directory.\n" +
+        "  --force-resolution   optional. Overrides every asset's own minResolution for this run " +
+        "(e.g. while iterating on prompts/layout, to keep requests cheap) without editing its spec.\n" +
+        "Model selection needs an OpenRouter API key: git config openrouter.imagenapikey, read from " +
+        "whichever repo the current directory is inside (see readGitConfigKey).\n" +
+        "To re-tune CHROMA_KEY_* constants against an already-generated raw without spending on a " +
+        "fresh generation, use ./clean-image instead — it only works if this asset's generation " +
+        "actually needed chroma-key cleanup in the first place (native-transparent and opaque " +
+        "outputs never cache a raw, since there's nothing to re-clean).",
+    );
+  }
+
+  return { assetsDir: resolve(callerCwd(), assetsDir), assetId, forceResolution };
+}
+
+async function main() {
+  const { assetsDir, assetId, forceResolution } = parseArgs(process.argv.slice(2));
+
+  const spec = await readSpec(assetsDir, assetId);
+  if (forceResolution) {
+    spec.minResolution = forceResolution;
+  }
+  const destination = resolve(callerCwd(), spec.destination);
+  const promptText = await readPromptText(assetsDir, assetId);
+
+  const result = await generateImageOpenRouter(promptText, spec, readOpenRouterApiKey());
+  const { bytes: rawBytes, needsChromaKey } = result;
+
+  let imageBytes: Buffer;
+  let rawPath: string | undefined;
+  if (needsChromaKey) {
+    // Only cache a .raw file when there's an actual cleanup step worth
+    // re-tuning later (see clean-image.ts) — a pass-through re-encode has
+    // nothing worth caching.
+    rawPath = `${destination}.raw`;
+    await mkdir(dirname(rawPath), { recursive: true });
+    await writeFile(rawPath, rawBytes);
+    imageBytes = await cleanImage(rawBytes);
+  } else {
+    imageBytes = await sharp(rawBytes).toFormat(outputFormat(spec.destination)).toBuffer();
+  }
+
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, imageBytes);
+
+  console.log(
+    rawPath
+      ? `Wrote ${imageBytes.length} bytes to ${destination} (raw cached at ${rawPath})`
+      : `Wrote ${imageBytes.length} bytes to ${destination} (no raw cached — output needed no chroma-key cleanup)`,
+  );
+}
+
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
+  process.exitCode = 1;
+});

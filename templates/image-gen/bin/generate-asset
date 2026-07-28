@@ -1,0 +1,33 @@
+#!/bin/bash
+# Thin shim, same pattern as ../../git/hooks/push-all: resolve this
+# script's own real location (so it works called via a symlink or a
+# relative path from anywhere).
+#
+# vite-node needs the real process cwd to actually be this package's own
+# directory to resolve its dependencies correctly (confirmed empirically —
+# without this, native deps like sharp fail to load at all; passing --root
+# instead of actually `cd`-ing is not enough, and --root also has its own
+# problem: vite-node's --script mode only strips the literal "--script"
+# flag and the script path from argv when reconstructing it for the
+# script's own process.argv, so any other vite-node flag like --root leaks
+# straight through into the script's own arguments). But the *caller's*
+# directory is what --assets-dir and the OpenRouter API key lookup
+# (readGitConfigKey/callerCwd() in generate-asset.ts) need to resolve
+# against. Those two requirements conflict on a single process.cwd() — so
+# this captures the caller's real directory into IMAGE_GEN_CALLER_CWD
+# before `cd`-ing here, and generate-asset.ts reads that env var instead of
+# raw process.cwd() wherever the *caller's* directory is what's meant.
+#
+# Lives in bin/, one level below the package itself, so its own filename
+# ("generate-asset") can never collide with generate-asset.ts's own module
+# specifier — an earlier version of this shim sat directly next to the
+# .ts files and shadowed them: Node/Vite's extensionless import
+# resolution matched the shim script itself before the .ts file with the
+# same base name, producing confusing failures (up to and including
+# trying to parse the bash script as JavaScript).
+set -euo pipefail
+BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PKG_DIR="$(cd "$BIN_DIR/.." && pwd)"
+export IMAGE_GEN_CALLER_CWD="$PWD"
+cd "$PKG_DIR"
+exec "$PKG_DIR/node_modules/.bin/vite-node" --script "$PKG_DIR/generate-asset.ts" "$@"

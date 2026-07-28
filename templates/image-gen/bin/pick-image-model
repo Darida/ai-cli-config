@@ -1,0 +1,9 @@
+#!/bin/bash
+# See ./generate-asset for why this captures IMAGE_GEN_CALLER_CWD and cds
+# into the package dir, why it lives in bin/, and why --root is NOT passed.
+set -euo pipefail
+BIN_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PKG_DIR="$(cd "$BIN_DIR/.." && pwd)"
+export IMAGE_GEN_CALLER_CWD="$PWD"
+cd "$PKG_DIR"
+exec "$PKG_DIR/node_modules/.bin/vite-node" --script "$PKG_DIR/pick-image-model.ts" "$@"

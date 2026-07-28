@@ -72,40 +72,18 @@ fi
 # One key, from the workspace root's own local git config, used for
 # every repo — no per-repo config, no fallback chain. Read once here and
 # passed in explicitly rather than letting approve-ai-work.sh re-derive it
-# itself from cwd. Which key is required depends on whether --gemini was
-# passed through to us (forwarded to every approve-ai-work.sh call below).
-USE_GEMINI=false
-for arg in "$@"; do
-    case "$arg" in
-        --gemini) USE_GEMINI=true ;;
-    esac
-done
-
-if [ "$USE_GEMINI" = true ]; then
-    WORKSPACE_KEY="$(git -C "$WORKSPACE_ROOT" config --get gemini.apikey || true)"
-    if [ -z "$WORKSPACE_KEY" ]; then
-        echo "❌ No gemini.apikey configured on the workspace root." >&2
-        echo "   Set it with: git -C \"$WORKSPACE_ROOT\" config --local gemini.apikey 'YOUR_KEY_HERE'" >&2
-        exit 1
-    fi
-else
-    WORKSPACE_KEY="$(git -C "$WORKSPACE_ROOT" config --get openrouter.githubapikey || true)"
-    if [ -z "$WORKSPACE_KEY" ]; then
-        echo "❌ No openrouter.githubapikey configured on the workspace root." >&2
-        echo "   Set it with: git -C \"$WORKSPACE_ROOT\" config --local openrouter.githubapikey 'YOUR_KEY_HERE'" >&2
-        echo "   (Or pass --gemini to use the Gemini API directly instead.)" >&2
-        exit 1
-    fi
+# itself from cwd.
+WORKSPACE_KEY="$(git -C "$WORKSPACE_ROOT" config --get openrouter.githubapikey || true)"
+if [ -z "$WORKSPACE_KEY" ]; then
+    echo "❌ No openrouter.githubapikey configured on the workspace root." >&2
+    echo "   Set it with: git -C \"$WORKSPACE_ROOT\" config --local openrouter.githubapikey 'YOUR_KEY_HERE'" >&2
+    exit 1
 fi
 
 for name in "${SUBMODULES_TO_APPROVE[@]}"; do
     echo ""
     echo "=== Approving $name ==="
-    if [ "$USE_GEMINI" = true ]; then
-        (cd "$WORKSPACE_ROOT/$name" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
-    else
-        (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
-    fi
+    (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
 
     # Approving a submodule always squash-merges it and resets its
     # ai-work branch to a brand-new commit — a fresh SHA that can never
@@ -123,11 +101,7 @@ done
 # (never touched it), or the loop ran and gave it a pointer-bump commit.
 echo ""
 echo "=== Approving workspace root ==="
-if [ "$USE_GEMINI" = true ]; then
-    (cd "$WORKSPACE_ROOT" && GEMINI_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
-else
-    (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
-fi
+(cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$APPROVE_SCRIPT" "$@")
 
 echo ""
 echo "✅ approve-all-ai-work done"
