@@ -64,7 +64,19 @@ echo ""
 
 # 3. Generate PR title and description using gemini CLI
 echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
-DIFF_CONTENT=$(git diff origin/main...HEAD -- . ':!go.sum')
+# Images are binary and can be large — never send their contents to the AI,
+# only which ones changed. IMAGE_EXCLUDES/IMAGE_PATHSPECS must stay in sync.
+IMAGE_EXCLUDES=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
+IMAGE_PATHSPECS=()
+for pattern in "${IMAGE_EXCLUDES[@]}"; do
+  IMAGE_PATHSPECS+=(":!${pattern}")
+done
+DIFF_CONTENT=$(git diff origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+
+CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${IMAGE_EXCLUDES[@]}")
+if [ -n "$CHANGED_IMAGES" ]; then
+  DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${CHANGED_IMAGES}"
+fi
 
 # Load prompt template and substitute diff content
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,6 +99,19 @@ PROMPT_TMPFILE="$(mktemp)"
 PAYLOAD_TMPFILE="$(mktemp)"
 trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
 printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
+
+PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
+PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
+if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
+  echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
+  read -p "Send it to the Gemini API anyway? (y/n) " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${RED}Aborted before sending request.${NC}"
+    exit 1
+  fi
+fi
+
 jq -n --rawfile text "$PROMPT_TMPFILE" '{contents: [{parts: [{text: $text}]}]}' > "$PAYLOAD_TMPFILE"
 
 # Call the REST API directly (using gemini-1.5-flash for speed/cost)
