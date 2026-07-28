@@ -43,6 +43,14 @@ silently refuse it either.
   you do end up needing to read further (impl for code, a script before
   running it) because the README truly didn't cover it, update the
   README with the missing piece once you've read it.
+- **Comments explain why, not what.** Non-trivial only, best-effort
+  short (2 lines max outside genuine complexity); prefer a well-named
+  helper/variable over a comment, and skip narrating history unless it's
+  non-obvious or the code would look wrong without it.
+- **File ordering.** Data-type/interface definitions default to their
+  own file, separate from the functions using them. Within a file,
+  order public before private, most important/complex before trivial;
+  `main()`, if present, goes first as the file's own entry point.
 
 ---
 
@@ -140,6 +148,48 @@ line/script most likely to trigger it, or a dedicated pitfalls/gotchas
 note near that code. The table still gets the current fact (the role
 that's now granted); the reasoning, if worth keeping at all, goes
 beside the code it protects, not inside the row.
+
+---
+
+## Comments
+
+A comment states **why**, never **what** — the code already says what;
+restating it in prose is a second copy of the same fact, and the two
+drift the moment either one changes without the other. Write one only
+when there's something genuinely non-obvious to explain: a hidden
+constraint, a workaround for a specific bug, a decision that isn't the
+first thing a reader would guess. If nothing like that is true, skip the
+comment entirely.
+
+Keep it best-effort short — one line where one line covers it. Anything
+past two lines is for cases too genuinely complex to compress further;
+that should be the rare exception, not the default.
+
+Prefer making the code explain itself over commenting it: a helper
+function or a local variable with a name that states its purpose often
+replaces a comment outright, and — unlike a comment — stays correct
+automatically as the surrounding code changes.
+
+Don't narrate history: a previous iteration, a solution that got
+replaced, or why one approach lost to another, in most cases doesn't
+belong in the file — that's what the commit message and PR description
+are for. The exception is when the reason itself is non-obvious, or the
+current code would look wrong or contradict common sense to a reader who
+doesn't know it; a short note earns its place there.
+
+---
+
+## File Ordering
+
+Default to putting a data type's structure/interface definition in its
+own file, separate from the functions that operate on it — attempt this
+whenever the split is reasonable, so any consumer can import the shape
+without pulling in logic it doesn't need.
+
+Within a file, order functions public before private, and within each of
+those, most important/complex before least. `main()`, when a file has
+one, goes at the very top — it's the file's own public entry point, even
+though it's usually the last thing to actually run.
 
 ---
 

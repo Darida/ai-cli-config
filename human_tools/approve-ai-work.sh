@@ -7,36 +7,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Default provider is OpenRouter; --gemini opts back into calling the
-# Gemini API directly (kept for comparison/fallback, not the common path).
-USE_GEMINI=false
-for arg in "$@"; do
-  case "$arg" in
-    --gemini) USE_GEMINI=true ;;
-  esac
-done
-
 # Accept the key as an input if the caller already has it (e.g.
 # approve-all-ai-work.sh reads it from each target repo's own local git
 # config before invoking this script) — otherwise fall back to reading it
 # from the current repo's git config, for standalone use.
-if [ "$USE_GEMINI" = true ]; then
-  GEMINI_API_KEY="${GEMINI_API_KEY:-$(git config --get gemini.apikey || echo "")}"
-  if [ -z "$GEMINI_API_KEY" ]; then
-    echo -e "${RED}Error: Gemini API key not found for this project.${NC}"
-    echo -e "To set it for this specific repository only, run:"
-    echo -e "git config --local gemini.apikey 'YOUR_KEY_HERE'"
-    exit 1
-  fi
-else
-  OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
-  if [ -z "$OPENROUTER_API_KEY" ]; then
-    echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
-    echo -e "To set it for this specific repository only, run:"
-    echo -e "git config --local openrouter.githubapikey 'YOUR_KEY_HERE'"
-    echo -e "${YELLOW}(Or pass --gemini to call the Gemini API directly instead.)${NC}"
-    exit 1
-  fi
+OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
+if [ -z "$OPENROUTER_API_KEY" ]; then
+  echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
+  echo -e "To set it for this specific repository only, run:"
+  echo -e "git config --local openrouter.githubapikey 'YOUR_KEY_HERE'"
+  exit 1
 fi
 
 echo -e "${YELLOW}=== AI Work Approval Workflow ===${NC}\n"
@@ -81,7 +61,7 @@ else
 fi
 echo ""
 
-# 3. Generate PR title and description (OpenRouter by default, --gemini for Gemini directly)
+# 3. Generate PR title and description via OpenRouter
 echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
 # Images are binary and can be large — never send their contents to the AI,
 # only which ones changed. IMAGE_EXCLUDES/IMAGE_PATHSPECS must stay in sync.
@@ -90,7 +70,14 @@ IMAGE_PATHSPECS=()
 for pattern in "${IMAGE_EXCLUDES[@]}"; do
   IMAGE_PATHSPECS+=(":!${pattern}")
 done
-DIFF_CONTENT=$(git diff origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+DIFF_CONTENT=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+
+# Deleted files can be large (e.g. a removed source file) and their full
+# removed content is rarely useful for a PR description — list names only.
+DELETED_FILES=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+if [ -n "$DELETED_FILES" ]; then
+  DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${DELETED_FILES}"
+fi
 
 CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${IMAGE_EXCLUDES[@]}")
 if [ -n "$CHANGED_IMAGES" ]; then
@@ -108,7 +95,7 @@ fi
 PROMPT_CONTENT=$(cat "$PROMPT_FILE")
 PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
-echo "  - Calling AI API ($([ "$USE_GEMINI" = true ] && echo "Gemini" || echo "OpenRouter"))..."
+echo "  - Calling AI API (OpenRouter)..."
 # The prompt embeds the full diff, which routinely exceeds the OS's
 # argv/environment size limit once a branch accumulates enough changes
 # ("Argument list too long") -- so both the jq escaping step and the
@@ -123,7 +110,7 @@ PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
-  read -p "Send it to the Gemini API anyway? (y/n) " -n 1 -r
+  read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
   echo
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${RED}Aborted before sending request.${NC}"
@@ -131,22 +118,16 @@ if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   fi
 fi
 
-if [ "$USE_GEMINI" = true ]; then
-  jq -n --rawfile text "$PROMPT_TMPFILE" '{contents: [{parts: [{text: $text}]}]}' > "$PAYLOAD_TMPFILE"
-  API_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${GEMINI_API_KEY}" \
-    -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE")
-  AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
-else
-  # openrouter/auto lets OpenRouter pick the underlying model per request
-  # rather than pinning one here.
-  jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/auto", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
-  API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
-    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-    -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE")
-  AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
-fi
+# openrouter/auto lets OpenRouter pick the underlying model per request
+# rather than pinning one here (only its dedicated Images API lacks an
+# auto-router — this is the general chat-completions endpoint, which does
+# have one).
+jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/auto", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  --data-binary "@$PAYLOAD_TMPFILE")
+AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
 
 if [ -z "$AI_OUTPUT" ]; then
   echo -e "${RED}Error: Failed to generate PR title and description${NC}"
