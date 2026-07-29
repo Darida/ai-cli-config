@@ -39,10 +39,13 @@ Evaluate the code diff against the following 6 rules and produce a concise, stru
 
 ## Output Instructions
 
-- Be **concise and short**.
-- Provide a **minimal, structured output** formatted as a list of actionable notes grouped by file or rule for a manual reviewer to double-check.
-- If no issues are found under a category/rule, state "Clean".
-- Do NOT include conversational preambles, intros, or summaries.
+- **Actionable Items Only**: Output ONLY actionable notes that require human attention or remediation before submission.
+- **Zero Noise**:
+  - Do NOT mention or list any files that do not require review/changes.
+  - Do NOT mention which rules were NOT violated, and do NOT output "Clean" sections.
+  - Do NOT include conversational preambles, intros, summaries, or postambles.
+- **Generalize Repeated Issues**: If the exact same issue affects multiple files or locations, generalize the finding into a single note and list a few specific places as representative examples (e.g., `path/to/fileA.ts:L12`, `path/to/fileB.ts:L44`).
+- **If Entire Diff Has No Actionable Items**: Output strictly the single phrase `NO_ACTIONABLE_ITEMS_FOUND`.
 
 ---
 
