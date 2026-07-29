@@ -288,4 +288,70 @@ describe("image cost estimate calibration", () => {
       ).toBeLessThanOrEqual(COST_TOLERANCE);
     });
   });
+
+  describe("mockImage input image cost estimation", () => {
+    it("calculates flat per-image input cost when unit is 'image'", () => {
+      const testModel: Model = {
+        modelId: "test/flat-input-image",
+        provider: "TestProvider",
+        pricing: [
+          { billable: "input_image", unit: "image", cost_usd: 0.02 },
+          { billable: "output_image", unit: "image", cost_usd: 0.05 },
+        ],
+      };
+      const requirements: ImageGenerationRequirements = {
+        destination: "out.png",
+        minResolution: "1K",
+        background: "opaque",
+        promptText: "A test prompt",
+        mockImage: "/path/to/mock.png",
+      };
+      const estimate = estimateCost(testModel, requirements);
+      expect(estimate?.usd).toBeCloseTo(0.07);
+    });
+
+    it("calculates megapixel input cost when unit is 'megapixel'", () => {
+      const testModel: Model = {
+        modelId: "test/mp-input-image",
+        provider: "TestProvider",
+        pricing: [
+          { billable: "input_image", unit: "megapixel", cost_usd: 0.01 },
+          { billable: "output_image", unit: "image", cost_usd: 0.05 },
+        ],
+      };
+      const requirements: ImageGenerationRequirements = {
+        destination: "out.png",
+        minResolution: "1K",
+        background: "opaque",
+        promptText: "A test prompt",
+        mockImage: "/path/to/mock.png",
+        mockImageWidth: 2000,
+        mockImageHeight: 1500, // 3 Megapixels -> $0.03
+      };
+      const estimate = estimateCost(testModel, requirements);
+      expect(estimate?.usd).toBeCloseTo(0.08);
+    });
+
+    it("calculates token input cost when unit is 'token'", () => {
+      const testModel: Model = {
+        modelId: "test/token-input-image",
+        provider: "TestProvider",
+        pricing: [
+          { billable: "input_image", unit: "token", cost_usd: 0.00001 },
+          { billable: "output_image", unit: "image", cost_usd: 0.05 },
+        ],
+      };
+      const requirements: ImageGenerationRequirements = {
+        destination: "out.png",
+        minResolution: "1K",
+        background: "opaque",
+        promptText: "A test prompt",
+        mockImage: "/path/to/mock.png",
+        mockImageWidth: 1024,
+        mockImageHeight: 1024,
+      };
+      const estimate = estimateCost(testModel, requirements);
+      expect(estimate?.usd).toBeGreaterThan(0.05);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import sharp from "sharp";
 
 // The one shared input model for every tool in this package (generate-
 // asset, pick-image-model, list-image-models, image-cost-estimate) — what
@@ -25,6 +26,7 @@ export interface AssetSpec {
   aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
   minResolution: "0.5K" | "1K" | "2K" | "4K"; // a floor, not an exact request — more resolution is always fine
   background: "transparent" | "opaque";
+  mockImage?: string; // Relative path to mock/reference image in assetsDir
 }
 
 // Every library function in this package accepts this combined entity two
@@ -34,6 +36,8 @@ export interface AssetSpec {
 // use directly, without touching the filesystem).
 export interface ImageGenerationRequirements extends AssetSpec {
   promptText: string;
+  mockImageWidth?: number;
+  mockImageHeight?: number;
 }
 
 // No tool in this package resolves a relative path against "wherever the
@@ -53,5 +57,28 @@ export async function readImageGenerationRequirements(assetsDir: string, assetId
   requireAbsolutePath("assets directory", assetsDir);
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
   const promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
-  return { ...spec, destination: resolve(assetsDir, spec.destination), promptText };
+
+  let mockImage: string | undefined;
+  let mockImageWidth: number | undefined;
+  let mockImageHeight: number | undefined;
+
+  if (spec.mockImage) {
+    mockImage = isAbsolute(spec.mockImage) ? spec.mockImage : resolve(assetsDir, spec.mockImage);
+    try {
+      const meta = await sharp(mockImage).metadata();
+      mockImageWidth = meta.width;
+      mockImageHeight = meta.height;
+    } catch {
+      // If sharp fails to read metadata, dimensions remain undefined (cost estimate will fallback to tier budget)
+    }
+  }
+
+  return {
+    ...spec,
+    destination: resolve(assetsDir, spec.destination),
+    mockImage,
+    mockImageWidth,
+    mockImageHeight,
+    promptText,
+  };
 }

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import type { ImageGenerationRequirements } from "../image-generation-requirements";
 import type { Model, ParamSpec, PricingLine } from "../model/types";
@@ -57,10 +58,19 @@ export async function fetchModelEndpoints(modelId: string): Promise<Model[]> {
 }
 
 function outputFormat(destination: string): "png" | "jpeg" {
-  const ext = extname(destination);
+  const ext = extname(destination).toLowerCase();
   if (ext === ".png") return "png";
   if (ext === ".jpg" || ext === ".jpeg") return "jpeg";
   throw new Error(`Unsupported destination extension for output format: ${ext}`);
+}
+
+function mimeTypeFor(filePath: string): string {
+  const ext = extname(filePath).toLowerCase();
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  return "image/png";
 }
 
 // Our tier name -> this specific model's own literal wire spelling.
@@ -80,7 +90,7 @@ function resolutionValueFor(model: Model, tier: ImageGenerationRequirements["min
 // this exact model — this only converts field values into OpenRouter's
 // wire format, it doesn't check support itself.
 export async function generateImage(model: Model, spec: ImageGenerationRequirements, apiKey: string): Promise<Buffer> {
-  const body = {
+  const body: Record<string, any> = {
     model: model.modelId,
     prompt: spec.promptText,
     resolution: resolutionValueFor(model, spec.minResolution),
@@ -88,6 +98,14 @@ export async function generateImage(model: Model, spec: ImageGenerationRequireme
     background: spec.background === "transparent" ? "transparent" : undefined,
     output_format: outputFormat(spec.destination),
   };
+
+  if (spec.mockImage) {
+    const fileBytes = await readFile(spec.mockImage);
+    const mime = mimeTypeFor(spec.mockImage);
+    const dataUrl = `data:${mime};base64,${fileBytes.toString("base64")}`;
+    body.input_images = [dataUrl];
+    body.image = dataUrl;
+  }
 
   const response = await fetch(IMAGES_URL, {
     method: "POST",

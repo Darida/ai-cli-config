@@ -75,27 +75,49 @@ export function estimateCost(model: Model, requirements: ImageGenerationRequirem
   const inputTextLine = model.pricing.find((p) => p.billable === "input_text" && p.unit === "token");
   const inputTextCost = inputTextLine ? inputTextLine.cost_usd * promptTokens : 0;
 
-  // input_image/input_reference/input_font pricing lines exist for
-  // reference-image inputs — generate-asset.ts never sends those, so they
-  // never apply here.
+  let inputImageCost = 0;
+  if (requirements.mockImage) {
+    const inputImageLine = model.pricing.find((p) => p.billable.startsWith("input_") && p.billable !== "input_text" && p.unit !== "token");
+    const inputTokenLine = model.pricing.find((p) => p.billable.startsWith("input_") && p.billable !== "input_text" && p.unit === "token");
+
+    if (inputImageLine) {
+      if (inputImageLine.unit === "image") {
+        inputImageCost += inputImageLine.cost_usd;
+      } else if (inputImageLine.unit === "megapixel") {
+        const mp = requirements.mockImageWidth && requirements.mockImageHeight
+          ? (requirements.mockImageWidth * requirements.mockImageHeight) / 1_000_000
+          : tierMegapixels(requirements.minResolution);
+        inputImageCost += inputImageLine.cost_usd * mp;
+      }
+    } else if (inputTokenLine) {
+      const totalPixels = requirements.mockImageWidth && requirements.mockImageHeight
+        ? requirements.mockImageWidth * requirements.mockImageHeight
+        : TIER_EDGE_PX[requirements.minResolution] ** 2;
+      const tokens = estimateOutputImageTokens(totalPixels);
+      inputImageCost += inputTokenLine.cost_usd * tokens;
+    }
+  }
+
+  const inputCost = inputTextCost + inputImageCost;
+
   const outputLine = model.pricing.find((p) => p.billable === "output_image");
   if (!outputLine) return null;
 
   if (outputLine.unit === "image") {
     const wanted = requirements.minResolution.toLowerCase();
     const variantLine = model.pricing.find((p) => p.billable === "output_image" && p.unit === "image" && p.variant?.toLowerCase() === wanted);
-    return { usd: inputTextCost + (variantLine ?? outputLine).cost_usd };
+    return { usd: inputCost + (variantLine ?? outputLine).cost_usd };
   }
 
   if (outputLine.unit === "megapixel") {
-    return { usd: inputTextCost + outputLine.cost_usd * tierMegapixels(requirements.minResolution) };
+    return { usd: inputCost + outputLine.cost_usd * tierMegapixels(requirements.minResolution) };
   }
 
   if (outputLine.unit === "token") {
     const totalPixels = TIER_EDGE_PX[requirements.minResolution] ** 2;
     const tokens = estimateOutputImageTokens(totalPixels);
-    return { usd: inputTextCost + outputLine.cost_usd * tokens };
+    return { usd: inputCost + outputLine.cost_usd * tokens };
   }
 
-  return { usd: inputTextCost, note: `unrecognized output billing unit "${outputLine.unit}" — output cost omitted` };
+  return { usd: inputCost, note: `unrecognized output billing unit "${outputLine.unit}" — output cost omitted` };
 }
