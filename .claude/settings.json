@@ -15,6 +15,7 @@
       "Read(//tmp/**)",
       "Bash(git commit *)",
       "Bash(git mv *)",
+      "Bash(git diff *)",
       "Bash(git reset *)"
     ],
     "ask": [
