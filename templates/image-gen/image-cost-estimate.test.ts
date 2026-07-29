@@ -96,6 +96,32 @@ const GROK_IMAGINE_IMAGE_QUALITY_XAI: Model = {
   ],
 };
 
+// Real declared endpoint data (OpenRouter's /images/models/.../endpoints,
+// fetched 2026-07-29) — the counterpart calibration case to
+// GROK_IMAGINE_IMAGE_QUALITY_XAI above: exactly one output_image/
+// unit:"image" line, no `variant`, so pickResolutionTier's
+// hasSingleFlatImagePrice() branch applies and always requests this
+// model's largest declared tier ("4K") regardless of the asset's own
+// "2K" floor — this is the model whose undeclared per-combination pixel
+// floor caused the original village-background failure at "2K" (see
+// asset-adjuster.ts's pickResolutionTier doc comment); requesting "4K"
+// avoids that floor entirely, and costs the same $0.04 either way.
+const SEEDREAM_4_5_SEED: Model = {
+  modelId: "bytedance-seed/seedream-4.5",
+  provider: "Seed",
+  supported_parameters: {
+    resolution: { type: "enum", values: ["1K", "2K", "4K"] },
+    aspect_ratio: {
+      type: "enum",
+      values: ["1:1", "1:2", "2:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "9:19.5", "19.5:9", "9:20", "20:9", "9:21", "21:9", "auto"],
+    },
+    n: { type: "range", min: 1, max: 10 },
+    input_references: { type: "range", min: 0, max: 14 },
+    seed: { type: "boolean" },
+  },
+  pricing: [{ billable: "output_image", unit: "image", cost_usd: 0.04 }],
+};
+
 const observations: RealObservation[] = [
   // ui-scene-frame via google/gemini-3-pro-image-preview (Google AI Studio), old malformed
   // chat-completions request — no aspect_ratio/resolution/background actually sent, model
@@ -208,6 +234,43 @@ const observations: RealObservation[] = [
     // variant line applies directly, no token-based derivation needed
     // (unlike the two Gemini entries above).
     expectedEstimatedCost: 0.07,
+  },
+  // village-roads via bytedance-seed/seedream-4.5 (Seed), real
+  // generate-asset.ts run — aspectRatio:"4:3", background:"transparent"
+  // requested, but this model declares no background parameter at all
+  // (native transparency unsupported), so chroma-key cleanup applied:
+  // CHROMA_KEY_BACKGROUND_CLAUSE got appended to the prompt and the
+  // actually-requested resolution was maxed to "4K" (single-flat-price
+  // model — see SEEDREAM_4_5_SEED's own comment above).
+  {
+    requirements: {
+      destination: "village-roads.png",
+      aspectRatio: "4:3",
+      minResolution: "4K",
+      background: "transparent",
+      // Real base prompt (village-roads.prompt.txt, 949 chars trimmed)
+      // plus the injected chroma-key clause (269 chars), joined by
+      // "\n\n" (2 chars) — 1220 chars total.
+      promptText: "A".repeat(1220),
+    },
+    model: SEEDREAM_4_5_SEED,
+    apiUsage: {
+      tokens_prompt: 309,
+      tokens_completion: 49152,
+      native_tokens_prompt: 309,
+      native_tokens_completion: 49152,
+      native_tokens_completion_images: 49152,
+      native_tokens_reasoning: null,
+      native_tokens_cached: null,
+      num_media_prompt: 0,
+      num_input_audio_prompt: null,
+      num_media_completion: 1,
+    },
+    realTotalCostUsd: 0.04,
+    // Single flat output_image/unit:"image" line, no variant — the base
+    // $0.04 applies regardless of which resolution tier got requested,
+    // no token-based derivation needed.
+    expectedEstimatedCost: 0.04,
   },
 ];
 
