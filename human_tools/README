@@ -19,6 +19,30 @@ After your AI agent finishes a task on the `ai-work` branch, preview diff in Git
 ./approve-ai-work.sh # OpenRouter (openrouter/auto), key from `git config openrouter.githubapikey`
 ```
 
+## AI Code Review Tool: review-ai-work.sh
+
+An automated AI review tool (`review-ai-work.sh`) that evaluates the current git diff against 4 core rules defined in `review.promt.md`:
+1. **Comments:** Checks that comments explain why (not what), remain short (1-2 lines), prefer self-explaining code over comments, and do not narrate history.
+2. **API & Public Signatures:** Evaluates public method signatures in isolation (ignoring impl) to flag questionable signatures or strange input/output types.
+3. **Implementation vs. API:** Verifies if the implementation matches what the API/signature implies without hidden behavior.
+4. **README Edits:** Ensures documentation updates describe the pure current state without historical comparisons.
+
+Usage:
+```bash
+./review-ai-work.sh [--noconfirm] [base_branch] # Optional base branch, defaults to origin/main
+```
+
+## Multi-repo workspace review: review-all-ai-work.sh
+
+Runs `review-ai-work.sh` across all workspace submodules (discovered from `.gitmodules`) and the workspace root.
+
+Usage:
+```bash
+./review-all-ai-work.sh [--noconfirm]
+```
+
+
+
 ## Multi-repo workspaces: approve-all-ai-work.sh
 
 For a workspace with submodules, `approve-all-ai-work.sh` runs the above

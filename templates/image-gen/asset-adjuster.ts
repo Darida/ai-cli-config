@@ -24,6 +24,9 @@ const CHROMA_KEY_BACKGROUND_CLAUSE =
 const TRANSPARENT_BACKGROUND_CLAUSE =
   "Render this on a fully transparent background — no background color, texture, gradient, or scenery of any kind; only the subject itself, with true alpha transparency everywhere else.";
 
+const MOCK_IMAGE_EXTRACT_CLAUSE =
+  "The provided reference image depicts a complete scene. Focus exclusively on generating the specific object or asset described in this prompt, isolating it from the rest of the scene while matching the visual style, aesthetic, and design details of that object as shown in the reference image.";
+
 // Dual-shape on purpose: OpenRouter/Gemini's declared resolution enums
 // have been observed spelling the smallest tier "512" (bare pixel number)
 // rather than "0.5K" — the other three tiers pass through identically to
@@ -56,6 +59,7 @@ export function adjust(spec: ImageGenerationRequirements, model: Model): ImageGe
   const needsChromaKey = wantsTransparent && !nativelySupported;
 
   let promptText = spec.promptText;
+  if (spec.mockImage) promptText += "\n\n" + MOCK_IMAGE_EXTRACT_CLAUSE;
   if (needsChromaKey) promptText += "\n\n" + CHROMA_KEY_BACKGROUND_CLAUSE;
   else if (nativelySupported) promptText += "\n\n" + TRANSPARENT_BACKGROUND_CLAUSE;
 

@@ -159,7 +159,8 @@ Each library function accepts that entity two ways:
   "destination": "path/to/output.png",
   "aspectRatio": "1:1",
   "minResolution": "1K",
-  "background": "transparent"
+  "background": "transparent",
+  "mockImage": "path/to/mock_scene.png"
 }
 ```
 
@@ -176,6 +177,13 @@ Each library function accepts that entity two ways:
 - `minResolution` — a **floor**, not an exact request: one of `0.5K`,
   `1K`, `2K`, `4K`. More resolution is always fine.
 - `background` — `"transparent"` or `"opaque"`.
+- `mockImage` — optional; string path or `InputImage` object (`{ path, width?, height? }`)
+  relative to `--assets-dir`. Parsed into a dedicated `InputImage` model entry.
+  When specified, `asset-adjuster` reinforces the prompt with an extraction clause
+  instructing the model to isolate and render only the requested asset from the full
+  scene while matching its visual style, `clients/open-router` transmits the image
+  as a base64 Data URL to OpenRouter, and `estimateCost` accounts for input image
+  billing lines.
 
 `<asset-id>.prompt.txt` in the same directory: the raw prompt text (becomes
 `promptText` on the parsed entity), plain text (not JSON), so it stays easy
@@ -188,6 +196,12 @@ are rarer and more fundamental — they change actual layout/size decisions.
 Splitting them keeps each kind of edit's diff and `git blame` legible on
 its own, instead of every wording tweak burying config history in noise
 and vice versa.
+
+### Prompt Writing Guidelines & Skill
+
+For detailed rules, modular prompt formulas, best practices, and side-by-side good/bad prompt examples across various model types (Imagen 3, Flux, Midjourney, DALL-E 3), see the image prompting skill guide:
+
+- `skills/image-prompting-guide/SKILL.md` (located in the `ai-cli-config` git repository).
 
 ## Model selection
 

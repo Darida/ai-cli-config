@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import sharp from "sharp";
 
 // The one shared input model for every tool in this package (generate-
 // asset, pick-image-model, list-image-models, image-cost-estimate) — what
@@ -16,6 +17,12 @@ import { isAbsolute, resolve } from "node:path";
 // Keeping them in separate files keeps each kind of edit's diff/blame
 // legible on its own, instead of every wording tweak burying config
 // history in noise and vice versa.
+export interface InputImage {
+  path: string;
+  width?: number;
+  height?: number;
+}
+
 export interface AssetSpec {
   // Output file path, relative to the directory containing this asset's
   // own .json/.prompt.txt files (assetsDir) — resolved to an absolute path
@@ -25,6 +32,8 @@ export interface AssetSpec {
   aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
   minResolution: "0.5K" | "1K" | "2K" | "4K"; // a floor, not an exact request — more resolution is always fine
   background: "transparent" | "opaque";
+  mockImage?: string | InputImage; // Relative path string or InputImage object in .json
+  useSharedStyle?: boolean; // Optional flag; defaults to true when _shared.prompt.txt exists
 }
 
 // Every library function in this package accepts this combined entity two
@@ -32,8 +41,9 @@ export interface AssetSpec {
 // both files off disk — what every CLI's main() uses) or the entity
 // already constructed in memory (what tests and other programmatic callers
 // use directly, without touching the filesystem).
-export interface ImageGenerationRequirements extends AssetSpec {
+export interface ImageGenerationRequirements extends Omit<AssetSpec, "mockImage"> {
   promptText: string;
+  mockImage?: InputImage;
 }
 
 // No tool in this package resolves a relative path against "wherever the
@@ -49,9 +59,49 @@ function requireAbsolutePath(flagName: string, value: string): void {
   }
 }
 
+/**
+ * Reads <assetId>.json and <assetId>.prompt.txt from assetsDir.
+ * Automatically prepends _shared.prompt.txt to promptText unless spec.useSharedStyle is false.
+ */
 export async function readImageGenerationRequirements(assetsDir: string, assetId: string): Promise<ImageGenerationRequirements> {
   requireAbsolutePath("assets directory", assetsDir);
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
-  const promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
-  return { ...spec, destination: resolve(assetsDir, spec.destination), promptText };
+  let promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
+
+  if (spec.useSharedStyle !== false) {
+    try {
+      const sharedPrompt = (await readFile(resolve(assetsDir, "_shared.prompt.txt"), "utf8")).trim();
+      if (sharedPrompt) {
+        promptText = `${sharedPrompt}\n\n${promptText}`;
+      }
+    } catch {
+      // _shared.prompt.txt is optional
+    }
+  }
+
+  let mockImage: InputImage | undefined;
+  if (spec.mockImage) {
+    const rawPath = typeof spec.mockImage === "string" ? spec.mockImage : spec.mockImage.path;
+    const absPath = isAbsolute(rawPath) ? rawPath : resolve(assetsDir, rawPath);
+    let width = typeof spec.mockImage === "object" ? spec.mockImage.width : undefined;
+    let height = typeof spec.mockImage === "object" ? spec.mockImage.height : undefined;
+
+    if (!width || !height) {
+      try {
+        const meta = await sharp(absPath).metadata();
+        width = width ?? meta.width;
+        height = height ?? meta.height;
+      } catch {
+        // If sharp fails to read metadata, dimensions remain undefined (cost estimate will fallback to tier budget)
+      }
+    }
+    mockImage = { path: absPath, width, height };
+  }
+
+  return {
+    ...spec,
+    destination: resolve(assetsDir, spec.destination),
+    mockImage,
+    promptText,
+  };
 }

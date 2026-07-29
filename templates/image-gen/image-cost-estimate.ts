@@ -67,6 +67,38 @@ function estimateOutputImageTokens(totalPixels: number): number {
   return Math.round(totalPixels / (PATCH_SIZE_PX * PATCH_SIZE_PX));
 }
 
+// Calculates input image cost based on OpenRouter billable units ("image", "megapixel", "token").
+function estimateInputImageCost(model: Model, requirements: ImageGenerationRequirements): number {
+  if (!requirements.mockImage) return 0;
+
+  const inputLine = model.pricing.find(
+    (p) => p.billable === "input_image" || p.billable === "input_reference",
+  );
+  if (!inputLine) return 0;
+
+  switch (inputLine.unit) {
+    case "image":
+      return inputLine.cost_usd;
+    case "megapixel": {
+      const mp =
+        requirements.mockImage.width && requirements.mockImage.height
+          ? (requirements.mockImage.width * requirements.mockImage.height) / 1_000_000
+          : tierMegapixels(requirements.minResolution);
+      return inputLine.cost_usd * mp;
+    }
+    case "token": {
+      const totalPixels =
+        requirements.mockImage.width && requirements.mockImage.height
+          ? requirements.mockImage.width * requirements.mockImage.height
+          : TIER_EDGE_PX[requirements.minResolution] ** 2;
+      const tokens = estimateOutputImageTokens(totalPixels);
+      return inputLine.cost_usd * tokens;
+    }
+    default:
+      throw new Error(`Unexpected input image billing unit "${inputLine.unit}" on model "${model.modelId}"`);
+  }
+}
+
 // requirements must already be adjusted (asset-adjuster.ts's adjust())
 // against this exact model — minResolution here is treated as the value
 // that will actually be requested, not a floor to double-check.
@@ -75,27 +107,27 @@ export function estimateCost(model: Model, requirements: ImageGenerationRequirem
   const inputTextLine = model.pricing.find((p) => p.billable === "input_text" && p.unit === "token");
   const inputTextCost = inputTextLine ? inputTextLine.cost_usd * promptTokens : 0;
 
-  // input_image/input_reference/input_font pricing lines exist for
-  // reference-image inputs — generate-asset.ts never sends those, so they
-  // never apply here.
+  const inputImageCost = estimateInputImageCost(model, requirements);
+  const inputCost = inputTextCost + inputImageCost;
+
   const outputLine = model.pricing.find((p) => p.billable === "output_image");
   if (!outputLine) return null;
 
   if (outputLine.unit === "image") {
     const wanted = requirements.minResolution.toLowerCase();
     const variantLine = model.pricing.find((p) => p.billable === "output_image" && p.unit === "image" && p.variant?.toLowerCase() === wanted);
-    return { usd: inputTextCost + (variantLine ?? outputLine).cost_usd };
+    return { usd: inputCost + (variantLine ?? outputLine).cost_usd };
   }
 
   if (outputLine.unit === "megapixel") {
-    return { usd: inputTextCost + outputLine.cost_usd * tierMegapixels(requirements.minResolution) };
+    return { usd: inputCost + outputLine.cost_usd * tierMegapixels(requirements.minResolution) };
   }
 
   if (outputLine.unit === "token") {
     const totalPixels = TIER_EDGE_PX[requirements.minResolution] ** 2;
     const tokens = estimateOutputImageTokens(totalPixels);
-    return { usd: inputTextCost + outputLine.cost_usd * tokens };
+    return { usd: inputCost + outputLine.cost_usd * tokens };
   }
 
-  return { usd: inputTextCost, note: `unrecognized output billing unit "${outputLine.unit}" — output cost omitted` };
+  return { usd: inputCost, note: `unrecognized output billing unit "${outputLine.unit}" — output cost omitted` };
 }
