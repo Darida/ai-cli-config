@@ -32,6 +32,16 @@ Usage:
 ./review-ai-work.sh [base_branch] # Optional base branch, defaults to origin/main
 ```
 
+## Multi-repo workspace review: review-all-ai-work.sh
+
+Runs `review-ai-work.sh` across all workspace submodules (discovered from `.gitmodules`) and the workspace root.
+
+Usage:
+```bash
+./review-all-ai-work.sh
+```
+
+
 
 ## Multi-repo workspaces: approve-all-ai-work.sh
 
