@@ -7,6 +7,7 @@
       "command(git pull)",
       "command(git reset)",
       "command(git status)",
+      "command(git mv)",
       "command(go mod)",
       "command(go test)",
       "command(cat)",
