@@ -84,13 +84,20 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 echo -e "${YELLOW}[2/3] Preparing prompt and sending to AI (OpenRouter)...${NC}"
-PROMPT_CONTENT=$(cat "$PROMPT_FILE")
-PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
-
 PROMPT_TMPFILE="$(mktemp)"
 PAYLOAD_TMPFILE="$(mktemp)"
-trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
-printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
+DIFF_TMPFILE="$(mktemp)"
+trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE"' EXIT
+
+printf '%s' "$DIFF_CONTENT" > "$DIFF_TMPFILE"
+
+node -e '
+const fs = require("fs");
+const template = fs.readFileSync(process.argv[1], "utf8");
+const diff = fs.readFileSync(process.argv[2], "utf8");
+const prompt = template.replace("{DIFF_CONTENT}", diff);
+fs.writeFileSync(process.argv[3], prompt, "utf8");
+' "$PROMPT_FILE" "$DIFF_TMPFILE" "$PROMPT_TMPFILE"
 
 PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))

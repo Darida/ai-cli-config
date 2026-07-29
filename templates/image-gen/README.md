@@ -201,7 +201,7 @@ and vice versa.
 
 For detailed rules, modular prompt formulas, best practices, and side-by-side good/bad prompt examples across various model types (Imagen 3, Flux, Midjourney, DALL-E 3), see the image prompting skill guide:
 
-- [Image Prompting Guide SKILL.md](file:///home/daridagm/Critter-Genetics-Breeder-Workspace/ai-cli-config/skills/image-prompting-guide/SKILL.md)
+- `skills/image-prompting-guide/SKILL.md` (located in the `ai-cli-config` git repository).
 
 ## Model selection
 
