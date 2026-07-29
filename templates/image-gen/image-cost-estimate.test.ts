@@ -3,13 +3,13 @@ import { estimateCost } from "./image-cost-estimate";
 import type { ImageGenerationRequirements } from "./image-generation-requirements";
 import type { Model } from "./model/types";
 
-// Calibration harness: each entry is one REAL generation we actually ran
-// and recorded the true billed usage for — checks estimateCost() (the
-// requirements → dollar-estimate pipeline used by every tool in this
-// package, including resolution-floor handling) against reality, not just
-// against itself. Add more entries here as more real generations get
-// recorded. If one starts failing (or a new one fails from the start), the
-// fix is tuning image-cost-estimate.ts's PATCH_SIZE_PX, not this file.
+// Calibration harness: ALL test entries in this file MUST come strictly from
+// REAL API calls where true billed usage data was provided by a human post-facto.
+// Synthetic/mock test entries are strictly prohibited in this file — do NOT add
+// synthetic tests here. New test entries may ONLY be added after a human provides
+// real recorded observation data from an actual API generation run.
+// If an observation test fails, the fix is tuning image-cost-estimate.ts's
+// PATCH_SIZE_PX, not modifying this file or adding synthetic tests.
 const COST_TOLERANCE = 0.3; // fail if our estimate is off by more than 30%
 
 // Raw usage object exactly as OpenRouter reported it for one real request —
@@ -286,72 +286,6 @@ describe("image cost estimate calibration", () => {
         error,
         `estimated $${estimatedUsd.toFixed(4)} vs expected $${obs.expectedEstimatedCost.toFixed(4)} (${(error * 100).toFixed(1)}% off)`,
       ).toBeLessThanOrEqual(COST_TOLERANCE);
-    });
-  });
-
-  describe("mockImage input image cost estimation", () => {
-    it("calculates flat per-image input cost when unit is 'image'", () => {
-      const testModel: Model = {
-        modelId: "test/flat-input-image",
-        provider: "TestProvider",
-        pricing: [
-          { billable: "input_image", unit: "image", cost_usd: 0.02 },
-          { billable: "output_image", unit: "image", cost_usd: 0.05 },
-        ],
-      };
-      const requirements: ImageGenerationRequirements = {
-        destination: "out.png",
-        minResolution: "1K",
-        background: "opaque",
-        promptText: "A test prompt",
-        mockImage: "/path/to/mock.png",
-      };
-      const estimate = estimateCost(testModel, requirements);
-      expect(estimate?.usd).toBeCloseTo(0.07);
-    });
-
-    it("calculates megapixel input cost when unit is 'megapixel'", () => {
-      const testModel: Model = {
-        modelId: "test/mp-input-image",
-        provider: "TestProvider",
-        pricing: [
-          { billable: "input_image", unit: "megapixel", cost_usd: 0.01 },
-          { billable: "output_image", unit: "image", cost_usd: 0.05 },
-        ],
-      };
-      const requirements: ImageGenerationRequirements = {
-        destination: "out.png",
-        minResolution: "1K",
-        background: "opaque",
-        promptText: "A test prompt",
-        mockImage: "/path/to/mock.png",
-        mockImageWidth: 2000,
-        mockImageHeight: 1500, // 3 Megapixels -> $0.03
-      };
-      const estimate = estimateCost(testModel, requirements);
-      expect(estimate?.usd).toBeCloseTo(0.08);
-    });
-
-    it("calculates token input cost when unit is 'token'", () => {
-      const testModel: Model = {
-        modelId: "test/token-input-image",
-        provider: "TestProvider",
-        pricing: [
-          { billable: "input_image", unit: "token", cost_usd: 0.00001 },
-          { billable: "output_image", unit: "image", cost_usd: 0.05 },
-        ],
-      };
-      const requirements: ImageGenerationRequirements = {
-        destination: "out.png",
-        minResolution: "1K",
-        background: "opaque",
-        promptText: "A test prompt",
-        mockImage: "/path/to/mock.png",
-        mockImageWidth: 1024,
-        mockImageHeight: 1024,
-      };
-      const estimate = estimateCost(testModel, requirements);
-      expect(estimate?.usd).toBeGreaterThan(0.05);
     });
   });
 });
