@@ -77,36 +77,32 @@ function estimateOutputImageTokens(totalPixels: number): number {
 function estimateInputImageCost(model: Model, requirements: ImageGenerationRequirements): number {
   if (!requirements.mockImage) return 0;
 
-  const imageLine = model.pricing.find(
-    (p) => (p.billable === "input_image" || p.billable === "input_reference") && p.unit !== "token",
+  const inputLine = model.pricing.find(
+    (p) => p.billable === "input_image" || p.billable === "input_reference",
   );
-  const tokenLine = model.pricing.find(
-    (p) => (p.billable === "input_image" || p.billable === "input_reference") && p.unit === "token",
-  );
+  if (!inputLine) return 0;
 
-  if (imageLine) {
-    if (imageLine.unit === "image") {
-      return imageLine.cost_usd;
-    }
-    if (imageLine.unit === "megapixel") {
+  switch (inputLine.unit) {
+    case "image":
+      return inputLine.cost_usd;
+    case "megapixel": {
       const mp =
         requirements.mockImage.width && requirements.mockImage.height
           ? (requirements.mockImage.width * requirements.mockImage.height) / 1_000_000
           : tierMegapixels(requirements.minResolution);
-      return imageLine.cost_usd * mp;
+      return inputLine.cost_usd * mp;
     }
+    case "token": {
+      const totalPixels =
+        requirements.mockImage.width && requirements.mockImage.height
+          ? requirements.mockImage.width * requirements.mockImage.height
+          : TIER_EDGE_PX[requirements.minResolution] ** 2;
+      const tokens = estimateOutputImageTokens(totalPixels);
+      return inputLine.cost_usd * tokens;
+    }
+    default:
+      throw new Error(`Unexpected input image billing unit "${inputLine.unit}" on model "${model.modelId}"`);
   }
-
-  if (tokenLine) {
-    const totalPixels =
-      requirements.mockImage.width && requirements.mockImage.height
-        ? requirements.mockImage.width * requirements.mockImage.height
-        : TIER_EDGE_PX[requirements.minResolution] ** 2;
-    const tokens = estimateOutputImageTokens(totalPixels);
-    return tokenLine.cost_usd * tokens;
-  }
-
-  return 0;
 }
 
 // requirements must already be adjusted (asset-adjuster.ts's adjust())
