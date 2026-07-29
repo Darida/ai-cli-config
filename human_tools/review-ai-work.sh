@@ -131,9 +131,11 @@ AI_OUTPUT=""
 while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
   if [ "$ATTEMPT" -gt 1 ]; then
     echo -e "${YELLOW}Attempt $ATTEMPT/$MAX_RETRIES: Retrying API call...${NC}"
+  else
+    echo -e "${YELLOW}Sending request to OpenRouter API (openrouter/free)...${NC}"
   fi
 
-  API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  API_RESPONSE=$(curl -s --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
     -H "Content-Type: application/json" \
     --data-binary "@$PAYLOAD_TMPFILE")
