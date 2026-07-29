@@ -107,11 +107,12 @@ const prompt = template.replace("{DIFF_CONTENT}", diff);
 fs.writeFileSync(process.argv[3], prompt, "utf8");
 ' "$PROMPT_FILE" "$DIFF_TMPFILE" "$PROMPT_TMPFILE"
 
-PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
-PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
-  if [ "$NO_CONFIRM" = false ]; then
+  if [ "$NO_CONFIRM" = true ]; then
+    echo -e "${YELLOW}⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size > 50KB).${NC}"
+    exit 0
+  else
     read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
