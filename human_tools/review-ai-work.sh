@@ -31,7 +31,15 @@ if [ -z "$BASE_REF" ]; then
   fi
 fi
 
-echo -e "${YELLOW}[1/3] Extracting git diff against ${BASE_REF}...${NC}"
+echo -e "${YELLOW}[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}...${NC}"
+
+# Abort if uncommitted changes exist
+if ! git diff-index --quiet HEAD --; then
+  echo -e "${RED}Error: Uncommitted changes detected. Please commit or stash your changes first.${NC}"
+  git status
+  exit 1
+fi
+echo -e "${GREEN}✓ Working tree is clean${NC}"
 
 # Define image exclusions (same as approval workflow)
 IMAGE_EXCLUDES=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
@@ -44,16 +52,6 @@ done
 DIFF_CONTENT=""
 if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   DIFF_CONTENT=$(git diff --diff-filter=d "$BASE_REF"...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || git diff --diff-filter=d "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" || echo "")
-fi
-
-# Include uncommitted working tree changes if present
-UNCOMMITTED_DIFF=$(git diff --diff-filter=d HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || echo "")
-if [ -n "$UNCOMMITTED_DIFF" ]; then
-  if [ -n "$DIFF_CONTENT" ]; then
-    DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Uncommitted working tree changes:"$'\n'"${UNCOMMITTED_DIFF}"
-  else
-    DIFF_CONTENT="Uncommitted working tree changes:"$'\n'"${UNCOMMITTED_DIFF}"
-  fi
 fi
 
 DELETED_FILES=$(git diff --diff-filter=D --name-only "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || echo "")
