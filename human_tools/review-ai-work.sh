@@ -1,14 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Read OpenRouter API Key
 OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
 if [ -z "$OPENROUTER_API_KEY" ]; then
   echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
@@ -19,7 +17,6 @@ fi
 
 echo -e "${YELLOW}=== AI Work Code Review ===${NC}\n"
 
-# Determine base ref for diff
 BASE_REF="${1:-}"
 if [ -z "$BASE_REF" ]; then
   if git rev-parse --verify origin/main >/dev/null 2>&1; then
@@ -33,7 +30,6 @@ fi
 
 echo -e "${YELLOW}[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}...${NC}"
 
-# Abort if uncommitted changes exist
 if ! git diff-index --quiet HEAD --; then
   echo -e "${RED}Error: Uncommitted changes detected. Please commit or stash your changes first.${NC}"
   git status
@@ -41,14 +37,12 @@ if ! git diff-index --quiet HEAD --; then
 fi
 echo -e "${GREEN}✓ Working tree is clean${NC}"
 
-# Define image exclusions (same as approval workflow)
 IMAGE_EXCLUDES=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
 IMAGE_PATHSPECS=()
 for pattern in "${IMAGE_EXCLUDES[@]}"; do
   IMAGE_PATHSPECS+=(":!${pattern}")
 done
 
-# Extract diff comparing BASE_REF...HEAD
 DIFF_CONTENT=""
 if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
   DIFF_CONTENT=$(git diff --diff-filter=d "$BASE_REF"...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || git diff --diff-filter=d "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" || echo "")
@@ -71,11 +65,10 @@ fi
 
 echo -e "${GREEN}✓ Diff extracted successfully${NC}\n"
 
-# Locate prompt template
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROMPT_FILE="$SCRIPT_DIR/review.promt.md"
+PROMPT_FILE="$SCRIPT_DIR/review.prompt.md"
 if [ ! -f "$PROMPT_FILE" ]; then
-  PROMPT_FILE="$SCRIPT_DIR/review.prompt.md"
+  PROMPT_FILE="$SCRIPT_DIR/review.promt.md"
 fi
 
 if [ ! -f "$PROMPT_FILE" ]; then

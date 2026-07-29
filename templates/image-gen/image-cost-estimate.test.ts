@@ -3,13 +3,8 @@ import { estimateCost } from "./image-cost-estimate";
 import type { ImageGenerationRequirements } from "./image-generation-requirements";
 import type { Model } from "./model/types";
 
-// Calibration harness: ALL test entries in this file MUST come strictly from
-// REAL API calls where true billed usage data was provided by a human post-facto.
-// Synthetic/mock test entries are strictly prohibited in this file — do NOT add
-// synthetic tests here. New test entries may ONLY be added after a human provides
-// real recorded observation data from an actual API generation run.
-// If an observation test fails, the fix is tuning image-cost-estimate.ts's
-// PATCH_SIZE_PX, not modifying this file or adding synthetic tests.
+// Calibration harness: All test entries MUST come strictly from real API observation data.
+// Do not add synthetic/mock tests; fix failures by tuning PATCH_SIZE_PX in image-cost-estimate.ts.
 const COST_TOLERANCE = 0.3; // fail if our estimate is off by more than 30%
 
 // Raw usage object exactly as OpenRouter reported it for one real request —

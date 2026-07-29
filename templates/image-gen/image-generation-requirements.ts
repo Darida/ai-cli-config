@@ -59,6 +59,10 @@ function requireAbsolutePath(flagName: string, value: string): void {
   }
 }
 
+/**
+ * Reads <assetId>.json and <assetId>.prompt.txt from assetsDir.
+ * Automatically prepends _shared.prompt.txt to promptText unless spec.useSharedStyle is false.
+ */
 export async function readImageGenerationRequirements(assetsDir: string, assetId: string): Promise<ImageGenerationRequirements> {
   requireAbsolutePath("assets directory", assetsDir);
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;

@@ -67,13 +67,7 @@ function estimateOutputImageTokens(totalPixels: number): number {
   return Math.round(totalPixels / (PATCH_SIZE_PX * PATCH_SIZE_PX));
 }
 
-// OpenRouter's live API (/images/models/.../endpoints) reports input image
-// pricing lines under billable names "input_image" or "input_reference", with
-// three units:
-//   - unit: "image" (flat cost per reference image, e.g. x-ai/grok-imagine-image-quality: $0.01/image,
-//     sourceful/riverflow-v2-pro: $0.20/input_reference)
-//   - unit: "megapixel" (per-megapixel cost, e.g. black-forest-labs/flux.2-flex: $0.06/megapixel)
-//   - unit: "token" (per-token cost, e.g. google/gemini-3-pro-image-preview: $0.000002/token)
+// Calculates input image cost based on OpenRouter billable units ("image", "megapixel", "token").
 function estimateInputImageCost(model: Model, requirements: ImageGenerationRequirements): number {
   if (!requirements.mockImage) return 0;
 
