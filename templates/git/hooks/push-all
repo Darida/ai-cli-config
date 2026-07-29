@@ -103,10 +103,3 @@ done < <(list_submodule_paths)
 commit_and_push "$WORKSPACE_ROOT" "workspace root"
 
 echo "✅ push-all done"
-
-REVIEW_ALL_SCRIPT="$CONFIG_REPO_ROOT/human_tools/review-all-ai-work.sh"
-if [ -f "$REVIEW_ALL_SCRIPT" ]; then
-    echo ""
-    echo "🔍 Running AI code review..."
-    "$REVIEW_ALL_SCRIPT" --noconfirm || echo "⚠️ AI code review returned an error or non-zero status"
-fi

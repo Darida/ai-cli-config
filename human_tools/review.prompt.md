@@ -19,7 +19,7 @@ You are ONLY an evaluator of the specific rules listed below (Rules 1 through 6)
 
 ### Rule 1: Review Comments
 - **Comments explain WHY, not WHAT:** The code itself states WHAT it does. Restating code in prose is redundant and drifts over time. Write a comment ONLY when there is something genuinely non-obvious to explain: a hidden constraint, a workaround for a specific bug, or a decision that isn't the first thing a reader would guess. If nothing like that is true, flag the comment for removal.
-- **Keep comments short:** Maximum 1 line where 1 line covers it. Anything past 2 lines must be reserved only for cases too genuinely complex to compress further.
+- **Keep comments short:** Maximum 1 line where 1 line covers it. Anything past 2 lines must be reserved only for cases too genuinely complex to compress further. **EXCEPTION:** Protocol Buffer (`.proto`) service/message files and public API specifications are exempt from this length limit; comments in `.proto` files are public API documentation for external callers and are explicitly allowed to be detailed and multi-line.
 - **Prefer self-explaining code over comments:** A well-named helper function or variable often replaces a comment outright and stays correct automatically. Flag comments that could be eliminated by better variable/function naming.
 - **Do not narrate history:** A previous iteration, a solution that got replaced, or why one approach lost to another belongs in commit messages or PR descriptions, NOT in source files (unless the reason itself is non-obvious or current code would look wrong to a reader without it).
 
