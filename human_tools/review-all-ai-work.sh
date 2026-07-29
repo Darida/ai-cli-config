@@ -80,23 +80,28 @@ if [ -z "$WORKSPACE_KEY" ]; then
     exit 1
 fi
 
+FAILED_REPOS=()
+
 for name in "${SUBMODULES_TO_REVIEW[@]}"; do
     echo ""
     echo "=== Reviewing $name ==="
-    (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@") || {
-        echo -e "\n❌ AI code review failed for $name (findings require resolution). Stopping." >&2
-        exit 1
-    }
+    if ! (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@"); then
+        FAILED_REPOS+=("$name")
+    fi
 done
 
 if [ "$WORKSPACE_HAD_CHANGES" -ne 0 ]; then
     echo ""
     echo "=== Reviewing workspace root ==="
-    (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@") || {
-        echo -e "\n❌ AI code review failed for workspace root (findings require resolution). Stopping." >&2
-        exit 1
-    }
+    if ! (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@"); then
+        FAILED_REPOS+=("workspace root")
+    fi
 fi
 
 echo ""
+if [ "${#FAILED_REPOS[@]}" -gt 0 ]; then
+    echo "❌ AI code review failed for: ${FAILED_REPOS[*]}" >&2
+    exit 1
+fi
+
 echo "✅ review-all-ai-work done"
