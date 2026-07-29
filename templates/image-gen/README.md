@@ -197,6 +197,12 @@ Splitting them keeps each kind of edit's diff and `git blame` legible on
 its own, instead of every wording tweak burying config history in noise
 and vice versa.
 
+### Prompt Writing Guidelines & Skill
+
+For detailed rules, modular prompt formulas, best practices, and side-by-side good/bad prompt examples across various model types (Imagen 3, Flux, Midjourney, DALL-E 3), see the image prompting skill guide:
+
+- [Image Prompting Guide SKILL.md](file:///home/daridagm/Critter-Genetics-Breeder-Workspace/ai-cli-config/skills/image-prompting-guide/SKILL.md)
+
 ## Model selection
 
 There's no auto-router on OpenRouter's Images API (unlike the general
