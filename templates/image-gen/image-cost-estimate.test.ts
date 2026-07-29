@@ -68,6 +68,60 @@ const GEMINI_3_1_FLASH_LITE_IMAGE_AI_STUDIO: Model = {
   pricing: [{ billable: "output_image", unit: "token", cost_usd: 0.00003 }],
 };
 
+// Real declared endpoint data (OpenRouter's /images/models/.../endpoints,
+// fetched 2026-07-29) — priced per-image, but with two separate
+// output_image lines, one per resolution `variant` ($0.05 at "1k", $0.07
+// at "2k"), not one flat price. This is the calibration case for
+// asset-adjuster.ts's hasSingleFlatImagePrice()/pickResolutionTier()
+// distinction: several output_image/unit:"image" lines means resolution
+// really does change cost, so pickResolutionTier keeps the
+// cheapest-that-clears-the-floor choice for this model rather than
+// maxing out.
+const GROK_IMAGINE_IMAGE_QUALITY_XAI: Model = {
+  modelId: "x-ai/grok-imagine-image-quality",
+  provider: "xAI",
+  supported_parameters: {
+    resolution: { type: "enum", values: ["1K", "2K"] },
+    aspect_ratio: {
+      type: "enum",
+      values: ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "auto"],
+    },
+    n: { type: "range", min: 1, max: 1 },
+    input_references: { type: "range", min: 0, max: 3 },
+  },
+  pricing: [
+    { billable: "input_image", unit: "image", cost_usd: 0.01 },
+    { billable: "output_image", unit: "image", cost_usd: 0.05, variant: "1k" },
+    { billable: "output_image", unit: "image", cost_usd: 0.07, variant: "2k" },
+  ],
+};
+
+// Real declared endpoint data (OpenRouter's /images/models/.../endpoints,
+// fetched 2026-07-29) — the counterpart calibration case to
+// GROK_IMAGINE_IMAGE_QUALITY_XAI above: exactly one output_image/
+// unit:"image" line, no `variant`, so pickResolutionTier's
+// hasSingleFlatImagePrice() branch applies and always requests this
+// model's largest declared tier ("4K") regardless of the asset's own
+// "2K" floor — this is the model whose undeclared per-combination pixel
+// floor caused the original village-background failure at "2K" (see
+// asset-adjuster.ts's pickResolutionTier doc comment); requesting "4K"
+// avoids that floor entirely, and costs the same $0.04 either way.
+const SEEDREAM_4_5_SEED: Model = {
+  modelId: "bytedance-seed/seedream-4.5",
+  provider: "Seed",
+  supported_parameters: {
+    resolution: { type: "enum", values: ["1K", "2K", "4K"] },
+    aspect_ratio: {
+      type: "enum",
+      values: ["1:1", "1:2", "2:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "9:19.5", "19.5:9", "9:20", "20:9", "9:21", "21:9", "auto"],
+    },
+    n: { type: "range", min: 1, max: 10 },
+    input_references: { type: "range", min: 0, max: 14 },
+    seed: { type: "boolean" },
+  },
+  pricing: [{ billable: "output_image", unit: "image", cost_usd: 0.04 }],
+};
+
 const observations: RealObservation[] = [
   // ui-scene-frame via google/gemini-3-pro-image-preview (Google AI Studio), old malformed
   // chat-completions request — no aspect_ratio/resolution/background actually sent, model
@@ -145,6 +199,78 @@ const observations: RealObservation[] = [
     // nothing to dedupe or subtract. expectedEstimatedCost is
     // realTotalCostUsd unchanged.
     expectedEstimatedCost: 0.0336,
+  },
+  // village-background via x-ai/grok-imagine-image-quality (xAI), real
+  // generate-asset.ts run through the current OpenRouter Images API path
+  // — aspectRatio:"4:3", resolution:"2K" requested, background:"opaque"
+  // (no chroma-key/transparency clause involved, so promptText is just
+  // the base prompt, unmodified).
+  {
+    requirements: {
+      destination: "village-background.png",
+      aspectRatio: "4:3",
+      minResolution: "2K",
+      background: "opaque",
+      // Real base prompt (village-background.prompt.txt, 1062 chars
+      // after readImageGenerationRequirements' .trim()).
+      promptText: "A".repeat(1062),
+    },
+    model: GROK_IMAGINE_IMAGE_QUALITY_XAI,
+    apiUsage: {
+      tokens_prompt: 266,
+      tokens_completion: 4175,
+      native_tokens_prompt: 266,
+      native_tokens_completion: 4175,
+      native_tokens_completion_images: 4175,
+      native_tokens_reasoning: null,
+      native_tokens_cached: null,
+      num_media_prompt: 0,
+      num_input_audio_prompt: null,
+      num_media_completion: 1,
+    },
+    realTotalCostUsd: 0.07,
+    // This model has no input_text/token pricing line at all and bills
+    // output_image flatly per resolution variant — the $0.07 "2k"
+    // variant line applies directly, no token-based derivation needed
+    // (unlike the two Gemini entries above).
+    expectedEstimatedCost: 0.07,
+  },
+  // village-roads via bytedance-seed/seedream-4.5 (Seed), real
+  // generate-asset.ts run — aspectRatio:"4:3", background:"transparent"
+  // requested, but this model declares no background parameter at all
+  // (native transparency unsupported), so chroma-key cleanup applied:
+  // CHROMA_KEY_BACKGROUND_CLAUSE got appended to the prompt and the
+  // actually-requested resolution was maxed to "4K" (single-flat-price
+  // model — see SEEDREAM_4_5_SEED's own comment above).
+  {
+    requirements: {
+      destination: "village-roads.png",
+      aspectRatio: "4:3",
+      minResolution: "4K",
+      background: "transparent",
+      // Real base prompt (village-roads.prompt.txt, 949 chars trimmed)
+      // plus the injected chroma-key clause (269 chars), joined by
+      // "\n\n" (2 chars) — 1220 chars total.
+      promptText: "A".repeat(1220),
+    },
+    model: SEEDREAM_4_5_SEED,
+    apiUsage: {
+      tokens_prompt: 309,
+      tokens_completion: 49152,
+      native_tokens_prompt: 309,
+      native_tokens_completion: 49152,
+      native_tokens_completion_images: 49152,
+      native_tokens_reasoning: null,
+      native_tokens_cached: null,
+      num_media_prompt: 0,
+      num_input_audio_prompt: null,
+      num_media_completion: 1,
+    },
+    realTotalCostUsd: 0.04,
+    // Single flat output_image/unit:"image" line, no variant — the base
+    // $0.04 applies regardless of which resolution tier got requested,
+    // no token-based derivation needed.
+    expectedEstimatedCost: 0.04,
   },
 ];
 

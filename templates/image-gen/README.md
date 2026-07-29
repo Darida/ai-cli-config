@@ -249,13 +249,21 @@ deliberately duplicated rank table rather than sharing one:
 
 Two independent halves:
 
-- **The prompt-side ask** (`asset-adjuster.ts`): when an asset needs
-  transparency but the model picked for this request can't natively
-  deliver it, `adjust()` appends an extra clause
-  (`CHROMA_KEY_BACKGROUND_CLAUSE`) to the prompt asking for a flat solid
-  magenta (`#FF00FF`) background instead — pick a project palette where
-  magenta never legitimately appears, so it's safe to key out without
-  clipping real image content.
+- **The prompt-side ask** (`asset-adjuster.ts`): whenever a spec asks for
+  `background: "transparent"`, `adjust()` reinforces the request with
+  matching prompt text either way, since providers vary in how reliably
+  they honor an out-of-band API parameter alone and prompt text is the
+  one channel every model actually attends to. If the model picked for
+  this request can't natively deliver transparency, it appends
+  `CHROMA_KEY_BACKGROUND_CLAUSE`, asking for a flat solid magenta
+  (`#FF00FF`) background instead — pick a project palette where magenta
+  never legitimately appears, so it's safe to key out without clipping
+  real image content — and downgrades `background` to `"opaque"` for the
+  actual request. If the model *does* support it natively, it instead
+  appends `TRANSPARENT_BACKGROUND_CLAUSE` (generic, asset-agnostic
+  wording asking for true alpha transparency) and leaves `background` as
+  `"transparent"`, so `generateImage()` still passes OpenRouter's real
+  `background` API parameter too — belt and suspenders, not either/or.
 - **The pixel-side cleanup** (`clean-image.ts`): turns that magenta
   background into real alpha. Both a library function (`generate-
   asset.ts` calls `cleanImage()` directly right after a generation that

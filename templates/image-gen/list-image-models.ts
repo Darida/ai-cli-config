@@ -21,6 +21,12 @@ export interface ModelCostRow {
 }
 
 export interface ModelCostListing {
+  // Every model/provider endpoint OpenRouter reported, before adjust()
+  // excludes any of them — printFeatureSupport's landscape view needs
+  // this full set, not just whichever survive this asset's own aspect
+  // ratio/resolution requirements, so it can answer "what's out there"
+  // rather than "what's already been narrowed down to."
+  allCandidates: Model[];
   totalCandidates: number;
   excludedUnsupported: number;
   complete: ModelCostRow[];
@@ -55,6 +61,7 @@ export async function listModels(requirements: ImageGenerationRequirements): Pro
   }
 
   return {
+    allCandidates: candidates,
     totalCandidates: candidates.length,
     excludedUnsupported,
     complete: rows.filter((r) => !r.estimate.note).sort((a, b) => a.estimate.usd - b.estimate.usd),
@@ -120,7 +127,7 @@ async function main() {
   const requirements = await readImageGenerationRequirements(assetsDir, assetId);
   const promptTokens = estimateTokens(requirements.promptText);
 
-  const { totalCandidates, excludedUnsupported, complete, partial, missingPricing } = await listModels(requirements);
+  const { allCandidates, totalCandidates, excludedUnsupported, complete, partial, missingPricing } = await listModels(requirements);
 
   console.log(
     `Asset "${assetId}": aspectRatio=${requirements.aspectRatio ?? "(any)"}, minResolution=${requirements.minResolution} ` +
@@ -132,7 +139,7 @@ async function main() {
       `(aspect ratio or resolution floor), ${complete.length + partial.length + missingPricing.length} remain.\n`,
   );
 
-  printFeatureSupport([...complete, ...partial].map((r) => r.model).concat(missingPricing));
+  printFeatureSupport(allCandidates);
 
   console.log(`Fully estimated cost, cheapest first (${complete.length}):`);
   for (const r of complete) {

@@ -53,6 +53,11 @@ if ! go -C "$REPO" generate ./...; then
     exit 1
 fi
 
+if git -C "$REPO" check-ignore -q "$GEN_DIR"; then
+    echo "✓ $GEN_DIR regenerated (git-ignored, not tracked)"
+    exit 0
+fi
+
 CHANGES=$(git -C "$REPO" status --porcelain -- "$GEN_DIR")
 if [ -z "$CHANGES" ]; then
     echo "✓ $GEN_DIR is up to date"
