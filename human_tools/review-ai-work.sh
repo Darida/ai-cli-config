@@ -123,23 +123,58 @@ fi
 
 jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/free", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 
-API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
-  -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-  -H "Content-Type: application/json" \
-  --data-binary "@$PAYLOAD_TMPFILE")
+MAX_RETRIES=3
+ATTEMPT=1
+STATUS=""
+AI_OUTPUT=""
 
-AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
+while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
+  if [ "$ATTEMPT" -gt 1 ]; then
+    echo -e "${YELLOW}Attempt $ATTEMPT/$MAX_RETRIES: Retrying API call...${NC}"
+  fi
 
-if [ -z "$AI_OUTPUT" ]; then
-  echo -e "${RED}Error: Failed to generate AI review output.${NC}"
-  echo -e "${YELLOW}Raw API Response (Debug Info):${NC}"
-  echo "$API_RESPONSE"
-  exit 1
+  API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$PAYLOAD_TMPFILE")
+
+  RAW_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+  if [ -n "$RAW_OUTPUT" ]; then
+    FIRST_LINE=$(echo "$RAW_OUTPUT" | head -n 1 | tr -d '\r' | xargs)
+    if [ "$FIRST_LINE" = "LGTM" ]; then
+      STATUS="LGTM"
+      AI_OUTPUT="$RAW_OUTPUT"
+      break
+    elif [ "$FIRST_LINE" = "ACTION_REQUIRED" ]; then
+      STATUS="ACTION_REQUIRED"
+      AI_OUTPUT="$RAW_OUTPUT"
+      break
+    fi
+    echo -e "${YELLOW}Warning: Unexpected response first line ('$FIRST_LINE').${NC}"
+  fi
+
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 1
+done
+
+if [ -z "$STATUS" ]; then
+  STATUS="UNKNOWN"
+  if [ -n "${RAW_OUTPUT:-}" ]; then
+    AI_OUTPUT="$RAW_OUTPUT"
+  else
+    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts."
+  fi
 fi
 
-echo -e "${GREEN}✓ AI review complete${NC}\n"
+echo -e "${GREEN}✓ AI review complete (Result: ${STATUS})${NC}\n"
 
 echo -e "${YELLOW}[3/3] AI Code Review Notes for Manual Reviewer:${NC}"
 echo -e "${BLUE}======================================================${NC}"
 echo "$AI_OUTPUT"
 echo -e "${BLUE}======================================================${NC}"
+
+if [ "$STATUS" = "ACTION_REQUIRED" ] || [ "$STATUS" = "UNKNOWN" ]; then
+  echo -e "${RED}❌ Review failed with status: ${STATUS}${NC}"
+  exit 1
+fi

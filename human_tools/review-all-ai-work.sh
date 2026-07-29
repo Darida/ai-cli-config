@@ -83,13 +83,19 @@ fi
 for name in "${SUBMODULES_TO_REVIEW[@]}"; do
     echo ""
     echo "=== Reviewing $name ==="
-    (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@")
+    (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@") || {
+        echo -e "\n❌ AI code review failed for $name (findings require resolution). Stopping." >&2
+        exit 1
+    }
 done
 
 if [ "$WORKSPACE_HAD_CHANGES" -ne 0 ]; then
     echo ""
     echo "=== Reviewing workspace root ==="
-    (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@")
+    (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@") || {
+        echo -e "\n❌ AI code review failed for workspace root (findings require resolution). Stopping." >&2
+        exit 1
+    }
 fi
 
 echo ""
