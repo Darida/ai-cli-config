@@ -107,6 +107,9 @@ const prompt = template.replace("{DIFF_CONTENT}", diff);
 fs.writeFileSync(process.argv[3], prompt, "utf8");
 ' "$PROMPT_FILE" "$DIFF_TMPFILE" "$PROMPT_TMPFILE"
 
+PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
+PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
+
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
   if [ "$NO_CONFIRM" = true ]; then
