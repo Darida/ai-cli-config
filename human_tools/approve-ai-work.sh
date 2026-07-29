@@ -118,11 +118,8 @@ if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   fi
 fi
 
-# openrouter/auto lets OpenRouter pick the underlying model per request
-# rather than pinning one here (only its dedicated Images API lacks an
-# auto-router — this is the general chat-completions endpoint, which does
-# have one).
-jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/auto", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+# openrouter/free lets OpenRouter route to free models
+jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/free", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
   -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
   -H "Content-Type: application/json" \

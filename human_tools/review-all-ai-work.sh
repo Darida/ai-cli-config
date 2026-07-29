@@ -55,11 +55,22 @@ if [ "${#SUBMODULES_TO_REVIEW[@]}" -eq 0 ] && [ "$WORKSPACE_HAD_CHANGES" -eq 0 ]
     exit 0
 fi
 
-read -p "Proceed with review-ai-work.sh for each repository above? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "❌ Cancelled."
-    exit 1
+NO_CONFIRM=false
+for arg in "$@"; do
+  case "$arg" in
+    --noconfirm|--no-confirm|-y)
+      NO_CONFIRM=true
+      ;;
+  esac
+done
+
+if [ "$NO_CONFIRM" = false ]; then
+    read -p "Proceed with review-ai-work.sh for each repository above? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "❌ Cancelled."
+        exit 1
+    fi
 fi
 
 WORKSPACE_KEY="$(git -C "$WORKSPACE_ROOT" config --get openrouter.githubapikey || true)"

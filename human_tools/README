@@ -29,7 +29,7 @@ An automated AI review tool (`review-ai-work.sh`) that evaluates the current git
 
 Usage:
 ```bash
-./review-ai-work.sh [base_branch] # Optional base branch, defaults to origin/main
+./review-ai-work.sh [--noconfirm] [base_branch] # Optional base branch, defaults to origin/main
 ```
 
 ## Multi-repo workspace review: review-all-ai-work.sh
@@ -38,7 +38,7 @@ Runs `review-ai-work.sh` across all workspace submodules (discovered from `.gitm
 
 Usage:
 ```bash
-./review-all-ai-work.sh
+./review-all-ai-work.sh [--noconfirm]
 ```
 
 

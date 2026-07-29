@@ -17,7 +17,22 @@ fi
 
 echo -e "${YELLOW}=== AI Work Code Review ===${NC}\n"
 
-BASE_REF="${1:-}"
+NO_CONFIRM=false
+BASE_REF=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --noconfirm|--no-confirm|-y)
+      NO_CONFIRM=true
+      ;;
+    *)
+      if [ -z "$BASE_REF" ]; then
+        BASE_REF="$arg"
+      fi
+      ;;
+  esac
+done
+
 if [ -z "$BASE_REF" ]; then
   if git rev-parse --verify origin/main >/dev/null 2>&1; then
     BASE_REF="origin/main"
@@ -96,15 +111,17 @@ PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
-  read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${RED}Aborted before sending request.${NC}"
-    exit 1
+  if [ "$NO_CONFIRM" = false ]; then
+    read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo -e "${RED}Aborted before sending request.${NC}"
+      exit 1
+    fi
   fi
 fi
 
-jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/auto", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/free", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 
 API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
   -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
