@@ -4,9 +4,25 @@ import type { Model } from "./model/types";
 // Asking a model for a flat magenta background to key out in post
 // (clean-image.ts) when it can't natively render transparency. Magenta
 // (#FF00FF) is a color no real asset's palette should ever legitimately
-// contain, so it's safe to key out without clipping real content.
+// contain, so it's safe to key out without clipping real content. A
+// full standalone sentence, not a comma-led fragment — every
+// `.prompt.txt` already ends in its own terminal period, so this gets
+// joined on with a blank line (see adjust() below), never concatenated
+// straight onto existing punctuation.
 const CHROMA_KEY_BACKGROUND_CLAUSE =
-  ", the entire area meant to end up transparent — including the background behind the subject and any fully enclosed hollow regions within it — rendered as flat solid magenta (#FF00FF) with no gradient or texture; magenta must not appear anywhere else in the image";
+  "The entire area meant to end up transparent — including the background behind the subject and any fully enclosed hollow regions within it — must be rendered as flat solid magenta (#FF00FF) with no gradient or texture; magenta must not appear anywhere else in the image.";
+
+// Reinforces the request/background="transparent" API parameter
+// (clients/open-router.ts's generateImage()) with matching prompt text
+// when a model natively supports transparency — providers vary in how
+// reliably they honor an out-of-band parameter alone, and prompt text
+// is the one channel every model actually attends to. Deliberately
+// generic (no reference to any specific subject/asset) so it appends
+// cleanly to any prompt, the same way CHROMA_KEY_BACKGROUND_CLAUSE does
+// — a full standalone sentence, joined on with a blank line rather than
+// assuming anything about how the prompt's own last sentence ends.
+const TRANSPARENT_BACKGROUND_CLAUSE =
+  "Render this on a fully transparent background — no background color, texture, gradient, or scenery of any kind; only the subject itself, with true alpha transparency everywhere else.";
 
 // Dual-shape on purpose: OpenRouter/Gemini's declared resolution enums
 // have been observed spelling the smallest tier "512" (bare pixel number)
@@ -17,25 +33,37 @@ const RESOLUTION_RANK: Record<string, number> = { "512": 0, "0.5K": 0, "1K": 1, 
 const RESOLUTION_TIERS = ["0.5K", "1K", "2K", "4K"] as const;
 
 // Whether `model` can serve `spec` at all and, if so, a spec adjusted to
-// what it actually supports: minResolution substituted for the cheapest
-// qualifying tier, and — when the model can't natively render
-// transparency — background switched to "opaque" with the chroma-key
-// clause appended to promptText (clean-image.ts does the pixel-side half
-// of that workaround after generation). Returns null when nothing here
-// makes this model usable for this spec: unsupported aspect ratio, or no
-// resolution tier meets the floor.
+// what it actually supports: minResolution substituted for whichever
+// tier pickResolutionTier below picks (cheapest qualifying tier, or the
+// largest one for a per-image-billed model — see its own doc comment),
+// and — whenever spec asks for a transparent background
+// — promptText reinforced with matching text either way: the chroma-key
+// clause (plus background downgraded to "opaque") when the model can't
+// natively render transparency, so clean-image.ts's pixel-side cleanup
+// can key it out after generation; or, when the model does support it
+// natively, TRANSPARENT_BACKGROUND_CLAUSE instead, background left as
+// "transparent" so generateImage() still passes the real API parameter
+// too. Returns null when nothing here makes this model usable for this
+// spec: unsupported aspect ratio, or no resolution tier meets the floor.
 export function adjust(spec: ImageGenerationRequirements, model: Model): ImageGenerationRequirements | null {
   if (!supportsAspectRatio(model, spec.aspectRatio)) return null;
 
   const minResolution = pickResolutionTier(model, spec.minResolution);
   if (!minResolution) return null;
 
-  const needsChromaKey = spec.background === "transparent" && !supportsBackground(model, "transparent");
+  const wantsTransparent = spec.background === "transparent";
+  const nativelySupported = wantsTransparent && supportsBackground(model, "transparent");
+  const needsChromaKey = wantsTransparent && !nativelySupported;
+
+  let promptText = spec.promptText;
+  if (needsChromaKey) promptText += "\n\n" + CHROMA_KEY_BACKGROUND_CLAUSE;
+  else if (nativelySupported) promptText += "\n\n" + TRANSPARENT_BACKGROUND_CLAUSE;
+
   return {
     ...spec,
     minResolution,
     background: needsChromaKey ? "opaque" : spec.background,
-    promptText: needsChromaKey ? spec.promptText + CHROMA_KEY_BACKGROUND_CLAUSE : spec.promptText,
+    promptText,
   };
 }
 
@@ -58,11 +86,33 @@ function supportsAspectRatio(model: Model, aspectRatio: ImageGenerationRequireme
   return model.supported_parameters?.aspect_ratio?.values?.includes(aspectRatio) ?? false;
 }
 
-// The cheapest of our own tier names that's still at/above minResolution
-// and that this model actually declares support for — or undefined if
-// nothing qualifies. A model with no declared resolution parameter at all
-// is assumed to output around its own native ~512px by default, so it
-// only qualifies for 0.5K floors.
+// True when this model's output-image pricing is per-image (unit:
+// "image") rather than per-megapixel or per-token — i.e. resolution
+// doesn't change the base price. image-cost-estimate.ts still prices
+// whichever tier actually gets requested (it looks up a per-`variant`
+// surcharge line if the provider has one), so cost stays visible to
+// model selection even for these models — this only decides which tier
+// pickResolutionTier reaches for by default, never hides a price.
+function billedPerImage(model: Model): boolean {
+  return model.pricing.some((p) => p.billable === "output_image" && p.unit === "image");
+}
+
+// The resolution tier to request for this model, among the ones it
+// actually declares support for at/above minResolution — or undefined
+// if nothing qualifies. A model with no declared resolution parameter
+// at all is assumed to output around its own native ~512px by default,
+// so it only qualifies for 0.5K floors.
+//
+// For per-image-billed models (billedPerImage above), this picks the
+// *largest* qualifying tier rather than the cheapest: resolution is
+// free either way for these, so there's no cost reason to economize,
+// and asking for more headroom guards against a per-model minimum-pixel
+// floor OpenRouter's discovery API never exposes (a "2K" + a non-square
+// aspect ratio can still fall under some models' own undeclared pixel
+// floor — see the 2026-07-29 seedream-4.5 failure this rule was added
+// after: our "2K" request was rejected for computing to 2048x1536 at
+// 4:3, under that model's undocumented 3,686,400px minimum). Every
+// other model keeps the original cheapest-that-clears-the-floor choice.
 function pickResolutionTier(
   model: Model,
   minResolution: ImageGenerationRequirements["minResolution"],
@@ -73,5 +123,7 @@ function pickResolutionTier(
     return floorRank <= RESOLUTION_RANK["512"] ? minResolution : undefined;
   }
   const qualifyingRanks = declared.map((v) => RESOLUTION_RANK[v]).filter((r): r is number => r !== undefined && r >= floorRank);
-  return qualifyingRanks.length === 0 ? undefined : RESOLUTION_TIERS[Math.min(...qualifyingRanks)];
+  if (qualifyingRanks.length === 0) return undefined;
+  const rank = billedPerImage(model) ? Math.max(...qualifyingRanks) : Math.min(...qualifyingRanks);
+  return RESOLUTION_TIERS[rank];
 }
