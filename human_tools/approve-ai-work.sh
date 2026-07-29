@@ -106,20 +106,22 @@ PAYLOAD_TMPFILE="$(mktemp)"
 trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
 printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
 
-PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE")
+MODEL_NAME="openrouter/free"
+PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
   echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
+  echo -e "${YELLOW}A paid model (openrouter/auto) will be used for this PR description.${NC}"
   read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
   echo
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo -e "${RED}Aborted before sending request.${NC}"
     exit 1
   fi
+  MODEL_NAME="openrouter/auto"
 fi
 
-# openrouter/free lets OpenRouter route to free models
-jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/free", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
   -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
   -H "Content-Type: application/json" \

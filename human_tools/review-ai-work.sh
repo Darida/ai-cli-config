@@ -107,6 +107,7 @@ const prompt = template.replace("{DIFF_CONTENT}", diff);
 fs.writeFileSync(process.argv[3], prompt, "utf8");
 ' "$PROMPT_FILE" "$DIFF_TMPFILE" "$PROMPT_TMPFILE"
 
+MODEL_NAME="openrouter/free"
 PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
 
@@ -116,16 +117,18 @@ if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
     echo -e "${YELLOW}⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size > 50KB).${NC}"
     exit 0
   else
+    echo -e "${YELLOW}A paid model (openrouter/auto) will be used for this review.${NC}"
     read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
       echo -e "${RED}Aborted before sending request.${NC}"
       exit 1
     fi
+    MODEL_NAME="openrouter/auto"
   fi
 fi
 
-jq -n --rawfile text "$PROMPT_TMPFILE" '{model: "openrouter/free", messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 
 MAX_RETRIES=3
 ATTEMPT=1
@@ -136,7 +139,7 @@ while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
   if [ "$ATTEMPT" -gt 1 ]; then
     echo -e "${YELLOW}Attempt $ATTEMPT/$MAX_RETRIES: Retrying API call...${NC}"
   else
-    echo -e "${YELLOW}Sending request to OpenRouter API (openrouter/free)...${NC}"
+    echo -e "${YELLOW}Sending request to OpenRouter API (${MODEL_NAME})...${NC}"
   fi
 
   API_RESPONSE=$(curl -s --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
