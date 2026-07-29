@@ -67,6 +67,48 @@ function estimateOutputImageTokens(totalPixels: number): number {
   return Math.round(totalPixels / (PATCH_SIZE_PX * PATCH_SIZE_PX));
 }
 
+// OpenRouter's live API (/images/models/.../endpoints) reports input image
+// pricing lines under billable names "input_image" or "input_reference", with
+// three units:
+//   - unit: "image" (flat cost per reference image, e.g. x-ai/grok-imagine-image-quality: $0.01/image,
+//     sourceful/riverflow-v2-pro: $0.20/input_reference)
+//   - unit: "megapixel" (per-megapixel cost, e.g. black-forest-labs/flux.2-flex: $0.06/megapixel)
+//   - unit: "token" (per-token cost, e.g. google/gemini-3-pro-image-preview: $0.000002/token)
+function estimateInputImageCost(model: Model, requirements: ImageGenerationRequirements): number {
+  if (!requirements.mockImage) return 0;
+
+  const imageLine = model.pricing.find(
+    (p) => (p.billable === "input_image" || p.billable === "input_reference") && p.unit !== "token",
+  );
+  const tokenLine = model.pricing.find(
+    (p) => (p.billable === "input_image" || p.billable === "input_reference") && p.unit === "token",
+  );
+
+  if (imageLine) {
+    if (imageLine.unit === "image") {
+      return imageLine.cost_usd;
+    }
+    if (imageLine.unit === "megapixel") {
+      const mp =
+        requirements.mockImageWidth && requirements.mockImageHeight
+          ? (requirements.mockImageWidth * requirements.mockImageHeight) / 1_000_000
+          : tierMegapixels(requirements.minResolution);
+      return imageLine.cost_usd * mp;
+    }
+  }
+
+  if (tokenLine) {
+    const totalPixels =
+      requirements.mockImageWidth && requirements.mockImageHeight
+        ? requirements.mockImageWidth * requirements.mockImageHeight
+        : TIER_EDGE_PX[requirements.minResolution] ** 2;
+    const tokens = estimateOutputImageTokens(totalPixels);
+    return tokenLine.cost_usd * tokens;
+  }
+
+  return 0;
+}
+
 // requirements must already be adjusted (asset-adjuster.ts's adjust())
 // against this exact model — minResolution here is treated as the value
 // that will actually be requested, not a floor to double-check.
@@ -75,29 +117,7 @@ export function estimateCost(model: Model, requirements: ImageGenerationRequirem
   const inputTextLine = model.pricing.find((p) => p.billable === "input_text" && p.unit === "token");
   const inputTextCost = inputTextLine ? inputTextLine.cost_usd * promptTokens : 0;
 
-  let inputImageCost = 0;
-  if (requirements.mockImage) {
-    const inputImageLine = model.pricing.find((p) => p.billable.startsWith("input_") && p.billable !== "input_text" && p.unit !== "token");
-    const inputTokenLine = model.pricing.find((p) => p.billable.startsWith("input_") && p.billable !== "input_text" && p.unit === "token");
-
-    if (inputImageLine) {
-      if (inputImageLine.unit === "image") {
-        inputImageCost += inputImageLine.cost_usd;
-      } else if (inputImageLine.unit === "megapixel") {
-        const mp = requirements.mockImageWidth && requirements.mockImageHeight
-          ? (requirements.mockImageWidth * requirements.mockImageHeight) / 1_000_000
-          : tierMegapixels(requirements.minResolution);
-        inputImageCost += inputImageLine.cost_usd * mp;
-      }
-    } else if (inputTokenLine) {
-      const totalPixels = requirements.mockImageWidth && requirements.mockImageHeight
-        ? requirements.mockImageWidth * requirements.mockImageHeight
-        : TIER_EDGE_PX[requirements.minResolution] ** 2;
-      const tokens = estimateOutputImageTokens(totalPixels);
-      inputImageCost += inputTokenLine.cost_usd * tokens;
-    }
-  }
-
+  const inputImageCost = estimateInputImageCost(model, requirements);
   const inputCost = inputTextCost + inputImageCost;
 
   const outputLine = model.pricing.find((p) => p.billable === "output_image");
