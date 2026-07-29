@@ -90,8 +90,8 @@ function estimateInputImageCost(model: Model, requirements: ImageGenerationRequi
     }
     if (imageLine.unit === "megapixel") {
       const mp =
-        requirements.mockImageWidth && requirements.mockImageHeight
-          ? (requirements.mockImageWidth * requirements.mockImageHeight) / 1_000_000
+        requirements.mockImage.width && requirements.mockImage.height
+          ? (requirements.mockImage.width * requirements.mockImage.height) / 1_000_000
           : tierMegapixels(requirements.minResolution);
       return imageLine.cost_usd * mp;
     }
@@ -99,8 +99,8 @@ function estimateInputImageCost(model: Model, requirements: ImageGenerationRequi
 
   if (tokenLine) {
     const totalPixels =
-      requirements.mockImageWidth && requirements.mockImageHeight
-        ? requirements.mockImageWidth * requirements.mockImageHeight
+      requirements.mockImage.width && requirements.mockImage.height
+        ? requirements.mockImage.width * requirements.mockImage.height
         : TIER_EDGE_PX[requirements.minResolution] ** 2;
     const tokens = estimateOutputImageTokens(totalPixels);
     return tokenLine.cost_usd * tokens;

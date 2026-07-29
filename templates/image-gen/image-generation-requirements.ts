@@ -17,6 +17,12 @@ import sharp from "sharp";
 // Keeping them in separate files keeps each kind of edit's diff/blame
 // legible on its own, instead of every wording tweak burying config
 // history in noise and vice versa.
+export interface InputImage {
+  path: string;
+  width?: number;
+  height?: number;
+}
+
 export interface AssetSpec {
   // Output file path, relative to the directory containing this asset's
   // own .json/.prompt.txt files (assetsDir) — resolved to an absolute path
@@ -26,7 +32,7 @@ export interface AssetSpec {
   aspectRatio?: "1:1" | "3:2" | "2:3" | "3:4" | "4:3" | "4:5" | "5:4" | "9:16" | "16:9" | "21:9";
   minResolution: "0.5K" | "1K" | "2K" | "4K"; // a floor, not an exact request — more resolution is always fine
   background: "transparent" | "opaque";
-  mockImage?: string; // Relative path to mock/reference image in assetsDir
+  mockImage?: string | InputImage; // Relative path string or InputImage object in .json
 }
 
 // Every library function in this package accepts this combined entity two
@@ -34,10 +40,9 @@ export interface AssetSpec {
 // both files off disk — what every CLI's main() uses) or the entity
 // already constructed in memory (what tests and other programmatic callers
 // use directly, without touching the filesystem).
-export interface ImageGenerationRequirements extends AssetSpec {
+export interface ImageGenerationRequirements extends Omit<AssetSpec, "mockImage"> {
   promptText: string;
-  mockImageWidth?: number;
-  mockImageHeight?: number;
+  mockImage?: InputImage;
 }
 
 // No tool in this package resolves a relative path against "wherever the
@@ -58,27 +63,29 @@ export async function readImageGenerationRequirements(assetsDir: string, assetId
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
   const promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
 
-  let mockImage: string | undefined;
-  let mockImageWidth: number | undefined;
-  let mockImageHeight: number | undefined;
-
+  let mockImage: InputImage | undefined;
   if (spec.mockImage) {
-    mockImage = isAbsolute(spec.mockImage) ? spec.mockImage : resolve(assetsDir, spec.mockImage);
-    try {
-      const meta = await sharp(mockImage).metadata();
-      mockImageWidth = meta.width;
-      mockImageHeight = meta.height;
-    } catch {
-      // If sharp fails to read metadata, dimensions remain undefined (cost estimate will fallback to tier budget)
+    const rawPath = typeof spec.mockImage === "string" ? spec.mockImage : spec.mockImage.path;
+    const absPath = isAbsolute(rawPath) ? rawPath : resolve(assetsDir, rawPath);
+    let width = typeof spec.mockImage === "object" ? spec.mockImage.width : undefined;
+    let height = typeof spec.mockImage === "object" ? spec.mockImage.height : undefined;
+
+    if (!width || !height) {
+      try {
+        const meta = await sharp(absPath).metadata();
+        width = width ?? meta.width;
+        height = height ?? meta.height;
+      } catch {
+        // If sharp fails to read metadata, dimensions remain undefined (cost estimate will fallback to tier budget)
+      }
     }
+    mockImage = { path: absPath, width, height };
   }
 
   return {
     ...spec,
     destination: resolve(assetsDir, spec.destination),
     mockImage,
-    mockImageWidth,
-    mockImageHeight,
     promptText,
   };
 }

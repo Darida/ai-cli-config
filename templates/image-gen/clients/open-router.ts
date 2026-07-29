@@ -100,8 +100,8 @@ export async function generateImage(model: Model, spec: ImageGenerationRequireme
   };
 
   if (spec.mockImage) {
-    const fileBytes = await readFile(spec.mockImage);
-    const mime = mimeTypeFor(spec.mockImage);
+    const fileBytes = await readFile(spec.mockImage.path);
+    const mime = mimeTypeFor(spec.mockImage.path);
     const dataUrl = `data:${mime};base64,${fileBytes.toString("base64")}`;
     body.input_images = [dataUrl];
     body.image = dataUrl;

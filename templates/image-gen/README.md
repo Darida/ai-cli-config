@@ -177,12 +177,13 @@ Each library function accepts that entity two ways:
 - `minResolution` — a **floor**, not an exact request: one of `0.5K`,
   `1K`, `2K`, `4K`. More resolution is always fine.
 - `background` — `"transparent"` or `"opaque"`.
-- `mockImage` — optional; relative file path to a mock/reference image in
-  `--assets-dir`. When specified, `asset-adjuster` reinforces the prompt
-  with an extraction clause instructing the model to isolate and render only
-  the requested asset from the full scene while matching its visual style,
-  `clients/open-router` transmits the image as a base64 Data URL to
-  OpenRouter, and `estimateCost` accounts for input image billing lines.
+- `mockImage` — optional; string path or `InputImage` object (`{ path, width?, height? }`)
+  relative to `--assets-dir`. Parsed into a dedicated `InputImage` model entry.
+  When specified, `asset-adjuster` reinforces the prompt with an extraction clause
+  instructing the model to isolate and render only the requested asset from the full
+  scene while matching its visual style, `clients/open-router` transmits the image
+  as a base64 Data URL to OpenRouter, and `estimateCost` accounts for input image
+  billing lines.
 
 `<asset-id>.prompt.txt` in the same directory: the raw prompt text (becomes
 `promptText` on the parsed entity), plain text (not JSON), so it stays easy
