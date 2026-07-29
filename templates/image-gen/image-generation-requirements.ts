@@ -33,6 +33,7 @@ export interface AssetSpec {
   minResolution: "0.5K" | "1K" | "2K" | "4K"; // a floor, not an exact request — more resolution is always fine
   background: "transparent" | "opaque";
   mockImage?: string | InputImage; // Relative path string or InputImage object in .json
+  useSharedStyle?: boolean; // Optional flag; defaults to true when _shared.prompt.txt exists
 }
 
 // Every library function in this package accepts this combined entity two
@@ -61,7 +62,18 @@ function requireAbsolutePath(flagName: string, value: string): void {
 export async function readImageGenerationRequirements(assetsDir: string, assetId: string): Promise<ImageGenerationRequirements> {
   requireAbsolutePath("assets directory", assetsDir);
   const spec = JSON.parse(await readFile(resolve(assetsDir, `${assetId}.json`), "utf8")) as AssetSpec;
-  const promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
+  let promptText = (await readFile(resolve(assetsDir, `${assetId}.prompt.txt`), "utf8")).trim();
+
+  if (spec.useSharedStyle !== false) {
+    try {
+      const sharedPrompt = (await readFile(resolve(assetsDir, "_shared.prompt.txt"), "utf8")).trim();
+      if (sharedPrompt) {
+        promptText = `${sharedPrompt}\n\n${promptText}`;
+      }
+    } catch {
+      // _shared.prompt.txt is optional
+    }
+  }
 
   let mockImage: InputImage | undefined;
   if (spec.mockImage) {
