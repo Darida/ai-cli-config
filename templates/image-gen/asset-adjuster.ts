@@ -86,15 +86,18 @@ function supportsAspectRatio(model: Model, aspectRatio: ImageGenerationRequireme
   return model.supported_parameters?.aspect_ratio?.values?.includes(aspectRatio) ?? false;
 }
 
-// True when this model's output-image pricing is per-image (unit:
-// "image") rather than per-megapixel or per-token — i.e. resolution
-// doesn't change the base price. image-cost-estimate.ts still prices
-// whichever tier actually gets requested (it looks up a per-`variant`
-// surcharge line if the provider has one), so cost stays visible to
-// model selection even for these models — this only decides which tier
-// pickResolutionTier reaches for by default, never hides a price.
-function billedPerImage(model: Model): boolean {
-  return model.pricing.some((p) => p.billable === "output_image" && p.unit === "image");
+// True when this model has exactly one output_image/unit:"image"
+// pricing line — a single flat price that really doesn't change with
+// resolution (e.g. bytedance-seed/seedream-4.5's one $0.04 line). False
+// both when there's no such line at all (billed per-megapixel/token
+// instead, where resolution obviously does change cost) and when there
+// are *several* such lines (a provider pricing different resolution
+// `variant`s differently — e.g. x-ai/grok-imagine-image-quality: $0.05
+// at variant "1k", $0.07 at variant "2k", a real recorded case — see
+// image-cost-estimate.test.ts's calibration entry for it). Only the
+// single-flat-line case gets the "resolution is free" treatment below.
+function hasSingleFlatImagePrice(model: Model): boolean {
+  return model.pricing.filter((p) => p.billable === "output_image" && p.unit === "image").length === 1;
 }
 
 // The resolution tier to request for this model, among the ones it
@@ -103,16 +106,18 @@ function billedPerImage(model: Model): boolean {
 // at all is assumed to output around its own native ~512px by default,
 // so it only qualifies for 0.5K floors.
 //
-// For per-image-billed models (billedPerImage above), this picks the
-// *largest* qualifying tier rather than the cheapest: resolution is
-// free either way for these, so there's no cost reason to economize,
-// and asking for more headroom guards against a per-model minimum-pixel
-// floor OpenRouter's discovery API never exposes (a "2K" + a non-square
-// aspect ratio can still fall under some models' own undeclared pixel
-// floor — see the 2026-07-29 seedream-4.5 failure this rule was added
-// after: our "2K" request was rejected for computing to 2048x1536 at
-// 4:3, under that model's undocumented 3,686,400px minimum). Every
-// other model keeps the original cheapest-that-clears-the-floor choice.
+// For models with a single flat per-image price (hasSingleFlatImagePrice
+// above), this picks the *largest* qualifying tier rather than the
+// cheapest: resolution is genuinely free either way for these, so
+// there's no cost reason to economize, and asking for more headroom
+// guards against a per-model minimum-pixel floor OpenRouter's discovery
+// API never exposes (a "2K" + a non-square aspect ratio can still fall
+// under some models' own undeclared pixel floor — see the 2026-07-29
+// seedream-4.5 failure this rule was added after: our "2K" request was
+// rejected for computing to 2048x1536 at 4:3, under that model's
+// undocumented 3,686,400px minimum). Every other model — including one
+// priced per resolution `variant`, where a bigger tier genuinely costs
+// more — keeps the original cheapest-that-clears-the-floor choice.
 function pickResolutionTier(
   model: Model,
   minResolution: ImageGenerationRequirements["minResolution"],
@@ -124,6 +129,6 @@ function pickResolutionTier(
   }
   const qualifyingRanks = declared.map((v) => RESOLUTION_RANK[v]).filter((r): r is number => r !== undefined && r >= floorRank);
   if (qualifyingRanks.length === 0) return undefined;
-  const rank = billedPerImage(model) ? Math.max(...qualifyingRanks) : Math.min(...qualifyingRanks);
+  const rank = hasSingleFlatImagePrice(model) ? Math.max(...qualifyingRanks) : Math.min(...qualifyingRanks);
   return RESOLUTION_TIERS[rank];
 }
