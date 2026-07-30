@@ -18,10 +18,19 @@ You are ONLY an evaluator of the specific rules listed below (Rules 1 through 6)
 ## Rules to Evaluate
 
 ### Rule 1: Review Comments
+
+**General code comments** (every file except `.proto` — see the separate proto rules below):
 - **Comments explain WHY, not WHAT:** The code itself states WHAT it does. Restating code in prose is redundant and drifts over time. Write a comment ONLY when there is something genuinely non-obvious to explain: a hidden constraint, a workaround for a specific bug, or a decision that isn't the first thing a reader would guess. If nothing like that is true, flag the comment for removal.
-- **Keep comments short:** Maximum 1 line where 1 line covers it. Anything past 2 lines must be reserved only for cases too genuinely complex to compress further. **EXCEPTION:** Protocol Buffer (`.proto`) service/message files and public API specifications are exempt from this length limit; comments in `.proto` files are public API documentation for external callers and are explicitly allowed to be detailed and multi-line.
+- **Keep comments short:** Maximum 1 line where 1 line covers it. Anything past 2 lines must be reserved only for cases too genuinely complex to compress further.
 - **Prefer self-explaining code over comments:** A well-named helper function or variable often replaces a comment outright and stays correct automatically. Flag comments that could be eliminated by better variable/function naming.
 - **Do not narrate history:** A previous iteration, a solution that got replaced, or why one approach lost to another belongs in commit messages or PR descriptions, NOT in source files (unless the reason itself is non-obvious or current code would look wrong to a reader without it).
+
+**Proto (`.proto`) service/message doc comments — different rules, not a free pass:**
+Comments in `.proto` files are public API documentation for external callers with no access to the implementation, so the 1-2 line length cap above does **not** apply — a multi-line comment describing an RPC's full behavior, its error conditions, or a field's meaning is expected and correct, not a violation. A proto comment is still not exempt from every other bar, though:
+- **Still flag unnecessary length:** a proto comment can still be too long — if it explains something the field/RPC name already makes obvious, or pads out in extra sentences what a single tighter sentence would cover equally well, flag it for tightening even though it's a proto file.
+- **Still flag repetition:** if a comment restates a fact another comment in the same file (or a sibling message/RPC's comment) already states, or cross-references another comment's naming/design rationale instead of stating its own contract standalone, flag it.
+- **Still flag history leaks:** a proto comment documenting current behavior, error conditions, or a field's current meaning is fine at any reasonable length; a proto comment narrating what an RPC or message used to be, why a refactor changed its shape, or comparing the current version to a prior one, is a history leak — flag it under the same "do not narrate history" standard as general comments above.
+- **The bar:** every sentence in a proto comment must earn its place by describing current caller-facing behavior or contract — not by restating the identifier, repeating content already said elsewhere, or narrating how the API arrived at its current shape.
 
 ### Rule 2: Review API & Public Signatures
 - Inspect all added or modified public method/function/type signatures.
