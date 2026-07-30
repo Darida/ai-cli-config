@@ -58,12 +58,18 @@ for pattern in "${IMAGE_EXCLUDES[@]}"; do
   IMAGE_PATHSPECS+=(":!${pattern}")
 done
 
+MD_EXCLUDES=('*.md')
+MD_PATHSPECS=()
+for pattern in "${MD_EXCLUDES[@]}"; do
+  MD_PATHSPECS+=(":!${pattern}")
+done
+
 DIFF_CONTENT=""
 if git rev-parse --verify "$BASE_REF" >/dev/null 2>&1; then
-  DIFF_CONTENT=$(git diff --diff-filter=d "$BASE_REF"...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || git diff --diff-filter=d "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" || echo "")
+  DIFF_CONTENT=$(git diff --diff-filter=d "$BASE_REF"...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" "${MD_PATHSPECS[@]}" 2>/dev/null || git diff --diff-filter=d "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" "${MD_PATHSPECS[@]}" || echo "")
 fi
 
-DELETED_FILES=$(git diff --diff-filter=D --name-only "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" 2>/dev/null || echo "")
+DELETED_FILES=$(git diff --diff-filter=D --name-only "$BASE_REF" -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}" "${MD_PATHSPECS[@]}" 2>/dev/null || echo "")
 if [ -n "$DELETED_FILES" ]; then
   DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${DELETED_FILES}"
 fi
@@ -71,6 +77,11 @@ fi
 CHANGED_IMAGES=$(git diff --name-only "$BASE_REF" -- "${IMAGE_EXCLUDES[@]}" 2>/dev/null || echo "")
 if [ -n "$CHANGED_IMAGES" ]; then
   DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${CHANGED_IMAGES}"
+fi
+
+CHANGED_MD=$(git diff --name-only "$BASE_REF" -- "${MD_EXCLUDES[@]}" 2>/dev/null || echo "")
+if [ -n "$CHANGED_MD" ]; then
+  DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Markdown files changed (contents omitted, filenames only):"$'\n'"${CHANGED_MD}"
 fi
 
 if [ -z "$DIFF_CONTENT" ]; then
