@@ -82,9 +82,6 @@ echo -e "${GREEN}✓ Diff extracted successfully${NC}\n"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="$SCRIPT_DIR/review.prompt.md"
-if [ ! -f "$PROMPT_FILE" ]; then
-  PROMPT_FILE="$SCRIPT_DIR/review.promt.md"
-fi
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo -e "${RED}Error: Prompt file not found at $PROMPT_FILE${NC}"
