@@ -30,7 +30,8 @@ Comments in `.proto` files are public API documentation for external callers who
 - **Check for unnecessary length:** a proto comment should describe something the field/RPC name doesn't already convey. Flag one that pads a simple fact into extra sentences, or spells out something already obvious from the identifier.
 - **Check for repetition:** each proto comment should state its own contract once. Flag one that restates a fact another comment in the same file already covers, or that points to another comment's naming/design rationale instead of stating its own.
 - **Check for history leaks:** a proto comment should describe current behavior only. Flag one that narrates what an RPC or message used to be, why a refactor changed its shape, or how the current version compares to a prior one — the same standard as "Do not narrate history" above.
-- **Overall bar:** every sentence should describe current caller-facing behavior or contract. Flag anything that merely restates the identifier, duplicates another comment, or narrates the API's history.
+- **Check for implementation leaks:** a proto comment should describe only what a caller can observe — inputs, outputs, behavior, and error conditions. Flag one that names which internal service or RPC gets called to fulfill the request, which internal field or data structure gets mutated, or any other server-side mechanism a caller has no visibility into and no need to know.
+- **Overall bar:** every sentence should describe current caller-facing behavior or contract. Flag anything that merely restates the identifier, duplicates another comment, narrates the API's history, or exposes how it's implemented.
 
 ### Rule 2: Review API & Public Signatures
 - Inspect all added or modified public method/function/type signatures.
