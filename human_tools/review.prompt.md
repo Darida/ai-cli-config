@@ -45,6 +45,7 @@ Comments in `.proto` files are public API documentation for external callers who
 - Compare the implementation logic against the API declaration.
 - **Check:** If you were to implement new code based on the function/method name and signature alone, would you implement it like that?
 - **Check:** Does the name and signature correctly and clearly imply what the function actually does, or does it have hidden behavior, unexpected side effects, or an unclear name?
+- **Go test assertions are not implementation logic:** in Go test files, `if got != want { t.Fatalf(...) }` (and its variants — `!=`, `!reflect.DeepEqual`, a negated bool check, etc., each followed by a failure call) is the standard idiom for asserting equality: the block runs, and the test fails, exactly when the values differ. Do not flag this pattern as "inverted logic," "inverted condition," or a bug — the condition being on the failure branch is the idiom working correctly, not a sign it's backwards.
 
 ### Rule 4: Review README Edits
 - Inspect any changes to `README.md` or documentation files.
