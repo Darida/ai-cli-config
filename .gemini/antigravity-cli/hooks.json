@@ -13,7 +13,7 @@
     ]
   },
   "question-readonly-note": {
-    "UserPromptSubmit": [
+    "PreInvocation": [
       {
         "hooks": [
           {
