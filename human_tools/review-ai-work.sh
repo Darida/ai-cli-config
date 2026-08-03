@@ -210,22 +210,6 @@ main() {
   fi
 }
 
-timestamp() {
-  date "+%Y-%m-%d %H:%M:%S"
-}
-
-log_info() {
-  echo -e "${YELLOW}[$(timestamp)] $1${NC}"
-}
-
-log_success() {
-  echo -e "${GREEN}[$(timestamp)] $1${NC}"
-}
-
-log_error() {
-  echo -e "${RED}[$(timestamp)] $1${NC}"
-}
-
 extract_git_diff() {
   local base_ref="$1"
   local image_excludes=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
@@ -264,6 +248,22 @@ extract_git_diff() {
   fi
 
   echo "$diff_content"
+}
+
+log_info() {
+  echo -e "${YELLOW}[$(timestamp)] $1${NC}"
+}
+
+log_success() {
+  echo -e "${GREEN}[$(timestamp)] $1${NC}"
+}
+
+log_error() {
+  echo -e "${RED}[$(timestamp)] $1${NC}"
+}
+
+timestamp() {
+  date "+%Y-%m-%d %H:%M:%S"
 }
 
 main "$@"
