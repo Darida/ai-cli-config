@@ -17,9 +17,6 @@
       "command(cat)",
       "read_file(//tmp/**)"
     ],
-    "ask": [
-      "command(gcloud)"
-    ],
     "deny": [
       "command(cd)",
       "command(git branch -D)",
@@ -28,29 +25,12 @@
       "command(git switch)",
       "command(git pr approve)",
       "command(gh pr review)"
+    ],
+    "ask": [
+      "command(gcloud)"
     ]
   },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "run_command",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.gemini/hooks/bash-guard/block-git-branch-changes.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.gemini/hooks/prompt-guard/question-readonly-note.sh"
-          }
-        ]
-      }
-    ]
-  }
+  "trustedWorkspaces": [
+    "/home/daridagm/Critter-Genetics-Breeder-Workspace"
+  ]
 }

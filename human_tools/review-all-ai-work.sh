@@ -68,6 +68,7 @@ main() {
     fi
 
     wipe_pending_history_file
+    trap 'flush_and_commit_history "$SCRIPT_DIR/history.json"' EXIT
 
     FAILED_REPOS=()
 
@@ -88,7 +89,6 @@ main() {
     fi
 
     echo ""
-    flush_and_commit_history "$SCRIPT_DIR/history.json"
 
     if [ "${#FAILED_REPOS[@]}" -gt 0 ]; then
         echo "❌ AI code review failed for: ${FAILED_REPOS[*]}" >&2
@@ -143,9 +143,11 @@ flush_and_commit_history() {
   } catch (e) {}
   ' "$history_file" "$pending_file" 2>/dev/null || true
 
-  git -C "$script_dir" add "$history_file" 2>/dev/null || true
-  if git -C "$script_dir" commit -m "chore(history): update AI review history log" 2>/dev/null; then
-    git -C "$script_dir" push origin ai-work 2>/dev/null || true
+  if git -C "$script_dir" status --porcelain "$history_file" 2>/dev/null | grep -q .; then
+    git -C "$script_dir" add "$history_file" 2>/dev/null || true
+    if git -C "$script_dir" commit -m "chore(history): update AI review history log" 2>/dev/null; then
+      git -C "$script_dir" push origin ai-work 2>/dev/null || true
+    fi
   fi
 }
 

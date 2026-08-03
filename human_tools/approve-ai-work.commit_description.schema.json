@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Short, clear PR title summarizing the changes"
+    },
+    "description": {
+      "type": "string",
+      "description": "Detailed multi-line PR description with context and overview"
+    }
+  },
+  "required": ["title", "description"],
+  "additionalProperties": false
+}

@@ -44,19 +44,21 @@ main() {
     fi
   fi
 
-  log_info "[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}..."
+  log_info "[1/3] Verifying clean working tree and extracting git diff against origin/main..."
 
   if ! git diff-index --quiet HEAD --; then
-    log_error "Error: Uncommitted changes detected. Please commit or stash your changes first."
+    local summary
+    summary=$(format_uncommitted_changes_summary)
+    log_error "Error: Uncommitted changes detected (${summary}). Please commit or stash your changes first."
     git status
     exit 1
   fi
   log_success "✓ Working tree is clean"
 
-  DIFF_CONTENT=$(extract_git_diff "$BASE_REF")
+  DIFF_CONTENT=$(extract_git_diff)
 
   if [ -z "$DIFF_CONTENT" ]; then
-    log_success "✓ No diff found against ${BASE_REF}. Nothing to review."
+    log_success "✓ No diff found against origin/main. Nothing to review."
     exit 0
   fi
 
@@ -109,51 +111,19 @@ main() {
     fi
   fi
 
+  SCHEMA_FILE="$SCRIPT_DIR/review.schema.json"
+  if [ ! -f "$SCHEMA_FILE" ]; then
+    log_error "Error: Schema file not found at $SCHEMA_FILE"
+    exit 1
+  fi
+
   HISTORY_FILE="$SCRIPT_DIR/history.json"
   EXCLUDED_MODELS=$(get_excluded_models "$HISTORY_FILE")
   if [ -n "$EXCLUDED_MODELS" ]; then
     log_info "Excluding models with high failure rates: ${EXCLUDED_MODELS}"
   fi
 
-  jq -n \
-    --rawfile text "$PROMPT_TMPFILE" \
-    --arg model "$MODEL_NAME" \
-    --arg excluded "$EXCLUDED_MODELS" \
-    '{
-      model: $model,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "code_review_response",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              status: {
-                type: "string",
-                enum: ["LGTM", "ACTION_REQUIRED"]
-              },
-              notes: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    rule: { type: "string" },
-                    text: { type: "string" }
-                  },
-                  required: ["rule", "text"],
-                  additionalProperties: false
-                }
-              }
-            },
-            required: ["status", "notes"],
-            additionalProperties: false
-          }
-        }
-      },
-      plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
-      messages: [{ role: "user", content: $text }]
-    }' > "$PAYLOAD_TMPFILE"
+  build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" "$EXCLUDED_MODELS" > "$PAYLOAD_TMPFILE"
 
   MAX_RETRIES=3
   ATTEMPT=1
@@ -211,9 +181,10 @@ main() {
     fi
 
     # Attempt failed — preserve tmp file for debugging and record failure
+    FAILURE_REASON=$(classify_response_failure "$RESPONSE_TMPFILE")
     record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "fail" 0
     FAILED_ATTEMPT_FILES+=("$RESPONSE_TMPFILE")
-    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}). Debug file: file://${RESPONSE_TMPFILE}"
+    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}, Reason: ${FAILURE_REASON}). Debug file: file://${RESPONSE_TMPFILE}"
 
     ATTEMPT=$((ATTEMPT + 1))
     sleep 1
@@ -241,7 +212,6 @@ main() {
 }
 
 extract_git_diff() {
-  local base_ref="$1"
   local image_excludes=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   local image_pathspecs=()
   for pattern in "${image_excludes[@]}"; do
@@ -255,9 +225,7 @@ extract_git_diff() {
   done
 
   local diff_content=""
-  if git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
-    diff_content=$(git diff --diff-filter=d "$base_ref"...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || git diff --diff-filter=d "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" || echo "")
-  fi
+  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
 
   if [ -n "$diff_content" ]; then
     diff_content=$(node -e '
@@ -287,24 +255,51 @@ extract_git_diff() {
   fi
 
   local deleted_files
-  deleted_files=$(git diff --diff-filter=D --name-only "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
+  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
   if [ -n "$deleted_files" ]; then
     diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
 
   local changed_images
-  changed_images=$(git diff --name-only "$base_ref" -- "${image_excludes[@]}" 2>/dev/null || echo "")
+  changed_images=$(git diff --name-only origin/main...HEAD -- "${image_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_images" ]; then
     diff_content="${diff_content}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${changed_images}"
   fi
 
   local changed_md
-  changed_md=$(git diff --name-only "$base_ref" -- "${md_excludes[@]}" 2>/dev/null || echo "")
+  changed_md=$(git diff --name-only origin/main...HEAD -- "${md_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_md" ]; then
     diff_content="${diff_content}"$'\n\n'"Markdown files changed (contents omitted, filenames only):"$'\n'"${changed_md}"
   fi
 
   echo "$diff_content"
+}
+
+build_openrouter_payload() {
+  local prompt_file="$1"
+  local schema_file="$2"
+  local model_name="$3"
+  local excluded_models="$4"
+
+  jq -n \
+    --rawfile text "$prompt_file" \
+    --rawfile schema "$schema_file" \
+    --arg model "$model_name" \
+    --arg excluded "$excluded_models" \
+    '{
+      model: $model,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_review_response",
+          strict: true,
+          schema: ($schema | fromjson)
+        }
+      },
+      reasoning: { exclude: true },
+      plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
+      messages: [{ role: "user", content: $text }]
+    }'
 }
 
 get_excluded_models() {
@@ -351,6 +346,31 @@ get_excluded_models() {
 
   console.log(excluded.join(" "));
   ' "$history_file" 2>/dev/null || echo ""
+}
+
+classify_response_failure() {
+  local response_file="$1"
+  if [ ! -f "$response_file" ]; then
+    echo "unknown"
+    return
+  fi
+  local content_val
+  content_val=$(jq -r '.choices[0].message.content' "$response_file" 2>/dev/null || echo "")
+  if [ "$content_val" = "null" ]; then
+    echo "empty response"
+  else
+    echo "unknown"
+  fi
+}
+
+format_uncommitted_changes_summary() {
+  local uncommitted_files=()
+  mapfile -t uncommitted_files < <(git status --porcelain | sed -E 's/^.. //' | grep -v '^[[:space:]]*$')
+  local count="${#uncommitted_files[@]}"
+  local file_list
+  file_list=$(printf '%s, ' "${uncommitted_files[@]}")
+  file_list="${file_list%, }"
+  echo "${count} file(s) modified: ${file_list}"
 }
 
 record_history_entry() {
