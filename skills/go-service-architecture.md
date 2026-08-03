@@ -111,13 +111,14 @@ clients/               # a binding to another service's own generated
                              # construct builds the real generated
                              # client against this dependency's own base
                              # URL; testing construct hands out an
-                             # unwired inproc.Adapter immediately, and
-                             # testing init points its embedded field at
-                             # the real, in-memory-backed *actions.Server
-                             # the owning service registers for that
-                             # same seed. Never the place any client
-                             # logic lives — there is no logic here
-                             # beyond wiring.
+                             # unwired inproc.Adapter immediately, and a
+                             # RegisterFieldInjection call points its
+                             # embedded field at the real,
+                             # in-memory-backed *actions.Server the
+                             # owning service registers for that same
+                             # seed. Never the place any client logic
+                             # lives — there is no logic here beyond
+                             # wiring.
 
 services/
   <name>/
@@ -145,9 +146,9 @@ services/
       <domain>/
         interface.go       # Manager interface + this package's own error sentinels
         impl/
-          manager.go         # NewEmptyManager()/Wire(), split in two only
-                              # when this Manager is a genuine participant
-                              # in a cross-service dependency cycle — see
+          manager.go         # NewIncompleteManager()/WireX(), split out
+                              # only for the one field that's a genuine
+                              # cross-service dependency-cycle edge — see
                               # **framework/inject** below
         module/
           module.go           # registers Manager into framework/inject's
@@ -446,11 +447,13 @@ one small, generic mechanism, both halves the same shape:
 
 ```go
 // framework/inject — process-wide, production
-func Register[T any](construct func() T, init func(T)) { ... }
+func Register[T any](construct func() T) { ... }
+func RegisterFieldInjection[T, T2 any](wire func(t T, dep T2)) { ... }
 func Get[T any]() T { ... }
 
 // framework/inject/testing — identical shape, keyed per seed
-func Register[T any](construct func(seed string) T, init func(seed string, T)) { ... }
+func Register[T any](construct func(seed string) T) { ... }
+func RegisterFieldInjection[T, T2 any](wire func(t T, dep T2)) { ... }
 func Get[T any](seed string) T { ... }
 ```
 
@@ -458,48 +461,71 @@ Each registered type gets a lazily-built, build-at-most-once value —
 one process-wide instance in production, one independent instance per
 test seed (`t.Name()` is the normal seed) in tests, so different tests,
 even parallel ones, never observe each other's value. `construct`
-produces a minimal, concrete value; `init` runs immediately after and is
-where that value's own dependencies get resolved, via further `Get`
-calls. **This two-step split is what makes a real dependency cycle
+produces a value other code can already hold a reference to; any step
+registered via `RegisterFieldInjection` for that same type runs
+immediately after, resolving one remaining dependency via a further
+`Get` call. **This two-step split is what makes a real dependency cycle
 resolvable without deadlocking**: the value is marked ready the instant
-`construct` returns, strictly before `init` starts recursing — so if
-resolving one type's dependencies loops back around to that same type
-(a genuine cycle among services, not a bug), the recursive `Get` call
-finds the value already there and returns it immediately instead of
-re-entering construction and deadlocking on itself.
+`construct` returns, strictly before any field-injection step starts
+recursing — so if resolving one type's dependencies loops back around to
+that same type (a genuine cycle among services, not a bug), the
+recursive `Get` call finds the value already there and returns it
+immediately instead of re-entering construction and deadlocking on
+itself.
 
-**Every registered type needs a `construct` that can hand back something
-concrete before any of its own dependencies resolve.** Most types get
-this for free — a repository, most `core/` Managers, and every
-`clients/<name>` adapter naturally have a trivial, dependency-free
-`construct`. A `core/<domain>/impl.Manager` built by a single eager,
-all-args-required constructor does not, if that domain is a genuine
-participant in a cross-service cycle (e.g. three services that each
-depend on the next one's client, forming a loop). For that case, split
-construction into two exported functions instead of one:
+**`construct` should build everything it can directly — field injection
+is a deliberate, narrowly-scoped exception, not the default.** Most
+types need it for nothing at all: a repository, most `core/` Managers,
+and every non-cycle dependency resolve every argument inline via `Get`
+inside `construct`, exactly like a plain constructor call — including
+a dependency that's itself a hand-rolled singleton with no `Get` of its
+own (a database client, a stateless ID generator): register *that*
+through `inject.Register` too, rather than letting `construct` reach
+into another package's own memoized getter directly. A `construct`
+that bypasses the registry for one of its own dependencies defeats the
+whole point of centralizing construction in one place. Reach for
+`RegisterFieldInjection` only for the one field that's a genuine
+participant in a cross-service dependency cycle (e.g. three services
+that each depend on the next one's client, forming a loop) — never for
+a field that just happens to be resolved via the registry. Introducing
+a new `RegisterFieldInjection` call outside the `clients/<name>` adapter
+layer (below) is worth a second look before landing it — it's a signal
+a design didn't manage to avoid the cycle, not a routine choice.
+
+For a `core/<domain>/impl.Manager` that's a genuine cycle participant,
+split construction so the cycle-edge field alone is left unset:
 
 ```go
-func NewEmptyManager() *Manager { return &Manager{} }   // construct: instant, unwired
-func Wire(m *Manager, repo Repository, dep OtherServiceClient, ...) { // init: fills the shell
-    m.repo, m.dep = repo, dep
+func NewManager(repo Repository, dep OtherServiceClient, cycleDep CycleServiceClient) creature.Manager {
+    return &Manager{repo: repo, dep: dep, cycleDep: cycleDep} // production convenience: everything at once
 }
-func NewManager(repo Repository, dep OtherServiceClient, ...) creature.Manager { // production convenience
-    m := NewEmptyManager()
-    Wire(m, repo, dep, ...)
-    return m
+func NewIncompleteManager(repo Repository, dep OtherServiceClient) *Manager { // construct: instant, cycle field unset
+    return &Manager{repo: repo, dep: dep}
 }
+func (m *Manager) WireCycleDep(cycleDep CycleServiceClient) { m.cycleDep = cycleDep } // field-injection target
 ```
 
-`module/module.go` registers `NewEmptyManager` as `construct` and a
-closure calling `Wire` (resolving every dependency via `Get`) as `init`.
-`Wire` takes the concrete `*Manager`, never the interface — a caller
-holding the wrong concrete type is a compile error, not a runtime panic
-on a failed type assertion. Calling any method on a `Manager` before
-`Wire` has run panics on a nil dependency, the same failure mode as
-forgetting to wire any other dependency — not something this type needs
-to guard against itself. **Reach for this split only when a real cycle
-demands it** — a plain, single-step `construct` (or calling `NewManager`
-directly) is the default for every type that isn't a cycle participant.
+`module/module.go` registers `NewIncompleteManager` as `construct`, and
+a `RegisterFieldInjection[Manager, CycleServiceClient]` call whose
+closure invokes `WireCycleDep` on the concrete `*Manager` (never the
+interface — a caller holding the wrong concrete type is a compile
+error, not a runtime panic on a failed type assertion). Every other
+field is still a plain constructor argument, resolved inline in
+`construct`; only the one cycle-edge field goes through this deferred
+path. Calling any method that needs the cycle-edge field before its
+`RegisterFieldInjection` step has run panics on a nil dependency, the
+same failure mode as forgetting to wire any other dependency — not
+something this type needs to guard against itself.
+
+**`clients/<name>/module`'s `inproc.Adapter` gets blanket use of
+`RegisterFieldInjection`, regardless of whether that particular
+dependency happens to sit on a real cycle today** — every client adapter
+is wired the same way uniformly, so the pattern doesn't silently break
+the moment a future dependency addition turns a currently-acyclic client
+into a cycle participant. This is the one deliberate exception to
+"reach for field injection only when a real cycle demands it": client
+adapters are pre-approved as a class, while a new field-injection use
+anywhere else is worth that second look before landing.
 
 **The `register` package convention** solves a different problem: a
 type's `Register` call has to actually run (via that package's `init()`)
@@ -512,11 +538,14 @@ package with no exported symbols, whose only content is blank-importing
 that service's own `repository/module`, every `core/<domain>/module`,
 and `actions/module` packages for their `init()` side effects.
 `clients/register/register.go` does the same for every
-`clients/<name>/module` package. A single top-level `register/register.go`
-blank-imports both of those, forming the one complete closure of the
-whole registry — `main.go` and every test blank-import this one
-top-level package (`_ "<module>/register"`) instead of curating their
-own subset.
+`clients/<name>/module` package. A shared framework primitive with no
+owning service (e.g. a random-ID generator, a database client) has no
+`services/<name>/register` home of its own, so it's blank-imported
+directly by the top-level `register/register.go` instead. A single
+top-level `register/register.go` blank-imports all of the above,
+forming the one complete closure of the whole registry — `main.go` and
+every test blank-import this one top-level package (`_ "<module>/register"`)
+instead of curating their own subset.
 
 ---
 
@@ -742,16 +771,19 @@ composition service only for assembled reads.
   on both sides of a cross-service call, not a stand-in for either side
   — the adapter exists purely to satisfy the Go compiler on a genuine
   import cycle, never to change behavior.
-- **The one exception is a dependency that isn't a Connect service at
-  all** — a clock, a random-ID generator. Those skip
-  `framework/inject`'s registry entirely and keep a small, hand-written
-  fake with a mutable field a test can flip mid-run (see `clients/clock`
-  for the concrete pattern: `FakeClient.Now()` reads a mutable `Time`
-  field live, so setting it after construction is picked up by the code
-  under test's very next call, no rebuild required). The registry-based
-  pattern above is specifically for dependencies that are themselves
-  real, testable services with their own business logic — faking still
-  makes sense for a primitive with no logic of its own to exercise.
+- **A dependency that isn't a Connect service (a clock, a random-ID
+  generator) goes through the same registry, not a separate mechanism**
+  — the registry doesn't require a registered value to be stateless.
+  `clients/clock` is the concrete pattern: production registers the real
+  `clock.Client`, testing registers `clock/fake.FakeClient`, a small
+  hand-written test double with a mutable `Time` field a test can flip
+  mid-run (`Now()` reads it live, so setting it after construction is
+  picked up by the code under test's very next call, no rebuild
+  required) — resolved as `injecttesting.Get[clock.Clock](t.Name())`,
+  then type-asserted back to `*fake.FakeClient` wherever a test needs to
+  mutate `.Time` directly. One independent `FakeClient` per seed, same
+  as everything else in the registry — never a shared, process-wide
+  mutable singleton a test has to remember to reset.
 - **A private helper method wrapping one RPC call is fine and expected
   — a shared type is not.** `core/<domain>/impl/manager.go` commonly
   has small unexported methods (`hold`, `confirm`, `getCreature`, ...)
