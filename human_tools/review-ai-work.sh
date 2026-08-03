@@ -10,13 +10,13 @@ NC='\033[0m'
 main() {
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
   if [ -z "$OPENROUTER_API_KEY" ]; then
-    echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
+    log_error "Error: OpenRouter API key not found for this project."
     echo -e "To set it for this specific repository only, run:"
     echo -e "git config --local openrouter.githubapikey 'YOUR_KEY_HERE'"
     exit 1
   fi
 
-  echo -e "${YELLOW}=== AI Work Code Review ===${NC}\n"
+  log_info "=== AI Work Code Review ==="
 
   NO_CONFIRM=false
   BASE_REF=""
@@ -44,14 +44,14 @@ main() {
     fi
   fi
 
-  echo -e "${YELLOW}[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}...${NC}"
+  log_info "[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}..."
 
   if ! git diff-index --quiet HEAD --; then
-    echo -e "${RED}Error: Uncommitted changes detected. Please commit or stash your changes first.${NC}"
+    log_error "Error: Uncommitted changes detected. Please commit or stash your changes first."
     git status
     exit 1
   fi
-  echo -e "${GREEN}✓ Working tree is clean${NC}"
+  log_success "✓ Working tree is clean"
 
   IMAGE_EXCLUDES=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   IMAGE_PATHSPECS=()
@@ -86,26 +86,25 @@ main() {
   fi
 
   if [ -z "$DIFF_CONTENT" ]; then
-    echo -e "${GREEN}✓ No diff found against ${BASE_REF}. Nothing to review.${NC}"
+    log_success "✓ No diff found against ${BASE_REF}. Nothing to review."
     exit 0
   fi
 
-  echo -e "${GREEN}✓ Diff extracted successfully${NC}\n"
+  log_success "✓ Diff extracted successfully"
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PROMPT_FILE="$SCRIPT_DIR/review.prompt.md"
 
   if [ ! -f "$PROMPT_FILE" ]; then
-    echo -e "${RED}Error: Prompt file not found at $PROMPT_FILE${NC}"
+    log_error "Error: Prompt file not found at $PROMPT_FILE"
     exit 1
   fi
 
-  echo -e "${YELLOW}[2/3] Preparing prompt and sending to AI (OpenRouter)...${NC}"
+  log_info "[2/3] Preparing prompt and sending to AI (OpenRouter)..."
   PROMPT_TMPFILE="$(mktemp)"
   PAYLOAD_TMPFILE="$(mktemp)"
   DIFF_TMPFILE="$(mktemp)"
-  RESPONSE_TMPFILE="$(mktemp)"
-  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE" "$RESPONSE_TMPFILE"' EXIT
+  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE"' EXIT
 
   printf '%s' "$DIFF_CONTENT" > "$DIFF_TMPFILE"
 
@@ -123,74 +122,98 @@ main() {
   PROMPT_SIZE_KB=$((PROMPT_SIZE_BYTES / 1024))
 
   if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
-    echo -e "${YELLOW}Notice: Formatted prompt size is ${PROMPT_SIZE_KB}KB (exceeds $((PROMPT_SIZE_LIMIT_BYTES / 1024))KB limit).${NC}"
+    log_info "Notice: Formatted prompt size is ${PROMPT_SIZE_KB}KB (exceeds $((PROMPT_SIZE_LIMIT_BYTES / 1024))KB limit)."
     if [ "$NO_CONFIRM" = true ]; then
-      echo -e "${YELLOW}⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size ${PROMPT_SIZE_KB}KB > 50KB).${NC}"
-      echo -e "${YELLOW}    To review this repository, run interactively without --noconfirm to approve using openrouter/auto.${NC}"
+      log_info "⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size ${PROMPT_SIZE_KB}KB > 50KB)."
+      log_info "    To review this repository, run interactively without --noconfirm to approve using openrouter/auto."
       exit 0
     else
-      echo -e "${YELLOW}A paid model (openrouter/auto) will be used for this review.${NC}"
+      log_info "A paid model (openrouter/auto) will be used for this review."
       read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
       echo
       if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${RED}Aborted before sending request.${NC}"
+        log_error "Aborted before sending request."
         exit 1
       fi
       MODEL_NAME="openrouter/auto"
     fi
   fi
 
-  jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+  jq -n \
+    --rawfile text "$PROMPT_TMPFILE" \
+    --arg model "$MODEL_NAME" \
+    '{
+      model: $model,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_review_response",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: {
+              status: {
+                type: "string",
+                enum: ["LGTM", "ACTION_REQUIRED"]
+              },
+              notes: {
+                type: "array",
+                items: { type: "string" }
+              }
+            },
+            required: ["status", "notes"],
+            additionalProperties: false
+          }
+        }
+      },
+      reasoning: { effort: "none", exclude: true },
+      messages: [{ role: "user", content: $text }]
+    }' > "$PAYLOAD_TMPFILE"
 
   MAX_RETRIES=3
   ATTEMPT=1
   STATUS=""
   AI_OUTPUT=""
-  LAST_HTTP_CODE=""
-  LAST_API_RESPONSE=""
+  FAILED_ATTEMPT_FILES=()
 
   while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
+    RESPONSE_TMPFILE=$(mktemp "/tmp/review_attempt_${ATTEMPT}_XXXXXX.json")
+
     if [ "$ATTEMPT" -gt 1 ]; then
-      echo -e "${YELLOW}[Attempt $ATTEMPT/$MAX_RETRIES] Retrying API call to OpenRouter (${MODEL_NAME})...${NC}"
+      log_info "[Attempt $ATTEMPT/$MAX_RETRIES] Retrying API call to OpenRouter (${MODEL_NAME})..."
     else
-      echo -e "${YELLOW}Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)...${NC}"
+      log_info "Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)..."
     fi
 
-    LAST_HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
       -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
       -H "Content-Type: application/json" \
       --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
 
-    LAST_API_RESPONSE=$(cat "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
+    HTTP_CODE=$(echo "$HTTP_CODE" | tr -d '\r\n[:space:]' | tail -c 3)
+    [ -z "$HTTP_CODE" ] && HTTP_CODE="000"
 
-    if [ "$LAST_HTTP_CODE" != "200" ]; then
-      log_http_error "$LAST_HTTP_CODE" "$LAST_API_RESPONSE"
-    fi
+    RAW_CONTENT=$(jq -r '.choices[0].message.content // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
+    PARSED_STATUS=$(echo "$RAW_CONTENT" | jq -r '.status // empty' 2>/dev/null || echo "")
 
-    RAW_OUTPUT=$(extract_completion_content "$RESPONSE_TMPFILE")
-
-    if [ -z "$RAW_OUTPUT" ]; then
-      if [ "$LAST_HTTP_CODE" = "200" ]; then
-        echo -e "${YELLOW}[WARN] API returned HTTP 200 but payload contained no choice content.${NC}"
-        CLEAN_BODY=$(echo "$LAST_API_RESPONSE" | sed '/^[[:space:]]*$/d' | head -n 30)
-        echo -e "${YELLOW}[DEBUG] Response Body: ${CLEAN_BODY}${NC}"
-      fi
-      ATTEMPT=$((ATTEMPT + 1))
-      sleep 1
-      continue
-    fi
-
-    FIRST_LINE=$(echo "$RAW_OUTPUT" | head -n 1 | tr -d '\r' | xargs)
-    case "$FIRST_LINE" in
-      LGTM|ACTION_REQUIRED)
-        STATUS="$FIRST_LINE"
-        AI_OUTPUT="$RAW_OUTPUT"
+    if [ "$HTTP_CODE" = "200" ] && [ -n "$PARSED_STATUS" ]; then
+      if [ "$PARSED_STATUS" = "LGTM" ]; then
+        STATUS="LGTM"
+        AI_OUTPUT="LGTM"
+        rm -f "$RESPONSE_TMPFILE"
         break
-        ;;
-      *)
-        echo -e "${YELLOW}[WARN] Response format mismatch (attempt $ATTEMPT/$MAX_RETRIES). Expected 'LGTM' or 'ACTION_REQUIRED', got: '${FIRST_LINE}'${NC}"
-        ;;
-    esac
+      elif [ "$PARSED_STATUS" = "ACTION_REQUIRED" ]; then
+        STATUS="ACTION_REQUIRED"
+        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- " + .' 2>/dev/null || echo "")
+        AI_OUTPUT="ACTION_REQUIRED"$'\n'"${FORMATTED_NOTES}"
+        rm -f "$RESPONSE_TMPFILE"
+        break
+      fi
+    fi
+
+    # Attempt failed — preserve tmp file for debugging
+    FAILED_ATTEMPT_FILES+=("$RESPONSE_TMPFILE")
+    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}). Debug file: file://${RESPONSE_TMPFILE}"
 
     ATTEMPT=$((ATTEMPT + 1))
     sleep 1
@@ -198,46 +221,39 @@ main() {
 
   if [ -z "$STATUS" ]; then
     STATUS="UNKNOWN"
-    if [ -n "${RAW_OUTPUT:-}" ]; then
-      AI_OUTPUT="$RAW_OUTPUT"
-    elif [ -n "${LAST_API_RESPONSE:-}" ]; then
-      AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts.\nHTTP Status: ${LAST_HTTP_CODE}\nRaw API Response:\n${LAST_API_RESPONSE}"
-    else
-      AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts (HTTP Status: ${LAST_HTTP_CODE}, no response body received)."
-    fi
+    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts.\nPreserved attempt debug files:\n"
+    for f in "${FAILED_ATTEMPT_FILES[@]}"; do
+      AI_OUTPUT="${AI_OUTPUT}  - file://${f}\n"
+    done
   fi
 
-  echo -e "${GREEN}✓ AI review complete (Result: ${STATUS})${NC}\n"
+  log_success "✓ AI review complete (Result: ${STATUS})\n"
 
-  echo -e "${YELLOW}[3/3] AI Code Review Notes for Manual Reviewer:${NC}"
+  log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
   echo -e "${BLUE}======================================================${NC}"
   echo -e "$AI_OUTPUT"
   echo -e "${BLUE}======================================================${NC}"
 
   if [ "$STATUS" = "ACTION_REQUIRED" ] || [ "$STATUS" = "UNKNOWN" ]; then
-    echo -e "${RED}❌ Review failed with status: ${STATUS}${NC}"
+    log_error "❌ Review failed with status: ${STATUS}"
     exit 1
   fi
 }
 
-extract_completion_content() {
-  local response_file="$1"
-  jq -r '.choices[0].message.content // empty' "$response_file" 2>/dev/null \
-    | sed '/^[[:space:]]*$/d' \
-    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo ""
+timestamp() {
+  date "+%Y-%m-%d %H:%M:%S"
 }
 
-log_http_error() {
-  local http_code="$1"
-  local response="$2"
-  echo -e "${RED}[ERROR] OpenRouter API call failed with HTTP status: ${http_code}${NC}"
-  local clean_error
-  clean_error=$(echo "$response" | sed '/^[[:space:]]*$/d' | head -n 30)
-  if [ -n "$clean_error" ]; then
-    echo -e "${RED}[ERROR] Response Body:${NC}\n${clean_error}"
-  else
-    echo -e "${RED}[ERROR] Request timed out or network connection failed.${NC}"
-  fi
+log_info() {
+  echo -e "${YELLOW}[$(timestamp)] $1${NC}"
+}
+
+log_success() {
+  echo -e "${GREEN}[$(timestamp)] $1${NC}"
+}
+
+log_error() {
+  echo -e "${RED}[$(timestamp)] $1${NC}"
 }
 
 main "$@"
