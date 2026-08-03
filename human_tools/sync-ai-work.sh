@@ -3,11 +3,9 @@
 # (recursively) -- e.g. run from a workspace root, it syncs the workspace
 # and all its project submodules in one shot.
 #
-# Per repo: fetch, then bring its own branch up to date with its own remote
-# (fast-forwards when possible, merges when it has diverged -- e.g. commits
-# made on another machine), then merges in main. Always merges, never
-# rebases -- these are shared branches synced across machines, and rebasing
-# would rewrite commit hashes anyone else has already fetched.
+# Always merges, never rebases -- these are shared branches synced across
+# machines, and rebasing would rewrite commit hashes anyone else has
+# already fetched.
 #
 # The repo you're standing in must have a clean tree, or the whole run
 # aborts before touching anything. Submodules found underneath are
@@ -110,11 +108,9 @@ sync_branch() {
   echo -e "${GREEN}✓ $name synced${NC}"
 }
 
-# Merges $ref into $repo's current branch. Non-conflicting changes (different
-# files/lines, or identical edits on both sides) merge automatically -- that's
-# git's three-way merge doing its job, not special-cased here. On a genuine
-# conflict, aborts the merge (tree left untouched) and either exits the whole
-# script (root repo) or returns 1 so the caller skips the rest of this repo.
+# On conflict, aborts the merge (tree left untouched) and either exits the
+# whole script (root repo) or returns 1 so the caller skips the rest of this
+# repo.
 merge_or_skip() {
   local repo="$1" name="$2" is_root="$3" ref="$4"
 
