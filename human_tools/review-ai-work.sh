@@ -118,11 +118,13 @@ fs.writeFileSync(process.argv[3], prompt, "utf8");
 MODEL_NAME="openrouter/free"
 PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
 PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
+PROMPT_SIZE_KB=$((PROMPT_SIZE_BYTES / 1024))
 
 if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
-  echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
+  echo -e "${YELLOW}Notice: Formatted prompt size is ${PROMPT_SIZE_KB}KB (exceeds $((PROMPT_SIZE_LIMIT_BYTES / 1024))KB limit).${NC}"
   if [ "$NO_CONFIRM" = true ]; then
-    echo -e "${YELLOW}⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size > 50KB).${NC}"
+    echo -e "${YELLOW}⏭️  Skipping AI code review for this repository (--noconfirm active and prompt size ${PROMPT_SIZE_KB}KB > 50KB).${NC}"
+    echo -e "${YELLOW}    To review this repository, run interactively without --noconfirm to approve using openrouter/auto.${NC}"
     exit 0
   else
     echo -e "${YELLOW}A paid model (openrouter/auto) will be used for this review.${NC}"
@@ -142,20 +144,34 @@ MAX_RETRIES=3
 ATTEMPT=1
 STATUS=""
 AI_OUTPUT=""
+LAST_HTTP_CODE=""
+LAST_API_RESPONSE=""
 
 while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
   if [ "$ATTEMPT" -gt 1 ]; then
-    echo -e "${YELLOW}Attempt $ATTEMPT/$MAX_RETRIES: Retrying API call...${NC}"
+    echo -e "${YELLOW}[Attempt $ATTEMPT/$MAX_RETRIES] Retrying API call to OpenRouter (${MODEL_NAME})...${NC}"
   else
-    echo -e "${YELLOW}Sending request to OpenRouter API (${MODEL_NAME})...${NC}"
+    echo -e "${YELLOW}Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)...${NC}"
   fi
 
-  API_RESPONSE=$(curl -s --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
     -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE")
+    --data-binary "@$PAYLOAD_TMPFILE" || echo -e "\nHTTP_STATUS:000")
 
-  RAW_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  LAST_HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2 || echo "000")
+  LAST_API_RESPONSE=$(echo "$HTTP_RESPONSE" | sed '/HTTP_STATUS:[0-9]*/d')
+
+  if [ "$LAST_HTTP_CODE" != "200" ]; then
+    echo -e "${RED}[ERROR] OpenRouter API call failed with HTTP status: ${LAST_HTTP_CODE}${NC}"
+    if [ -n "$LAST_API_RESPONSE" ]; then
+      echo -e "${RED}[ERROR] Response Body:${NC}\n${LAST_API_RESPONSE}"
+    else
+      echo -e "${RED}[ERROR] Request timed out or network connection failed.${NC}"
+    fi
+  fi
+
+  RAW_OUTPUT=$(echo "$LAST_API_RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
 
   if [ -n "$RAW_OUTPUT" ]; then
     FIRST_LINE=$(echo "$RAW_OUTPUT" | head -n 1 | tr -d '\r' | xargs)
@@ -168,7 +184,12 @@ while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
       AI_OUTPUT="$RAW_OUTPUT"
       break
     fi
-    echo -e "${YELLOW}Warning: Unexpected response first line ('$FIRST_LINE').${NC}"
+    echo -e "${YELLOW}[WARN] Response format mismatch (attempt $ATTEMPT/$MAX_RETRIES). Expected 'LGTM' or 'ACTION_REQUIRED', got: '${FIRST_LINE}'${NC}"
+  else
+    if [ "$LAST_HTTP_CODE" = "200" ]; then
+      echo -e "${YELLOW}[WARN] API returned HTTP 200 but payload contained no choice content.${NC}"
+      echo -e "${YELLOW}[DEBUG] Raw Response: ${LAST_API_RESPONSE}${NC}"
+    fi
   fi
 
   ATTEMPT=$((ATTEMPT + 1))
@@ -179,8 +200,10 @@ if [ -z "$STATUS" ]; then
   STATUS="UNKNOWN"
   if [ -n "${RAW_OUTPUT:-}" ]; then
     AI_OUTPUT="$RAW_OUTPUT"
+  elif [ -n "${LAST_API_RESPONSE:-}" ]; then
+    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts.\nHTTP Status: ${LAST_HTTP_CODE}\nRaw API Response:\n${LAST_API_RESPONSE}"
   else
-    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts."
+    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts (HTTP Status: ${LAST_HTTP_CODE}, no response body received)."
   fi
 fi
 
@@ -188,7 +211,7 @@ echo -e "${GREEN}✓ AI review complete (Result: ${STATUS})${NC}\n"
 
 echo -e "${YELLOW}[3/3] AI Code Review Notes for Manual Reviewer:${NC}"
 echo -e "${BLUE}======================================================${NC}"
-echo "$AI_OUTPUT"
+echo -e "$AI_OUTPUT"
 echo -e "${BLUE}======================================================${NC}"
 
 if [ "$STATUS" = "ACTION_REQUIRED" ] || [ "$STATUS" = "UNKNOWN" ]; then

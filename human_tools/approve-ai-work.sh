@@ -122,15 +122,20 @@ if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
 fi
 
 jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
-API_RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+
+HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
   -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
   -H "Content-Type: application/json" \
-  --data-binary "@$PAYLOAD_TMPFILE")
-AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty')
+  --data-binary "@$PAYLOAD_TMPFILE" || echo -e "\nHTTP_STATUS:000")
+
+HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2 || echo "000")
+API_RESPONSE=$(echo "$HTTP_RESPONSE" | sed '/HTTP_STATUS:[0-9]*/d')
+
+AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null || echo "")
 
 if [ -z "$AI_OUTPUT" ]; then
-  echo -e "${RED}Error: Failed to generate PR title and description${NC}"
-  echo -e "${YELLOW}Raw API Response (Debug Info):${NC}"
+  echo -e "${RED}[ERROR] Failed to generate PR title and description (HTTP Status: ${HTTP_CODE})${NC}"
+  echo -e "${RED}[ERROR] Raw API Response:${NC}"
   echo "$API_RESPONSE"
   exit 1
 fi
