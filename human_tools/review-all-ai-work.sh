@@ -68,6 +68,7 @@ main() {
     fi
 
     wipe_pending_history_file
+    trap 'flush_and_commit_history "$SCRIPT_DIR/history.json"' EXIT
 
     FAILED_REPOS=()
 
