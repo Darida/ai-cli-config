@@ -187,9 +187,6 @@ main() {
   echo -e "${GREEN}✓ ai-work branch history reset and ready for new work${NC}"
 }
 
-  echo -e "${GREEN}✓ ai-work branch history reset and ready for new work${NC}"
-}
-
 extract_git_diff_for_approval() {
   local non_sent_image_extensions=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   local image_pathspecs=()
