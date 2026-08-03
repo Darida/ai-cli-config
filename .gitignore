@@ -27,7 +27,7 @@
 !human_tools/
 !human_tools/**
 
-# 6. Track prompt files, git hooks, and image-gen tool
+# 6. Shared configuration subtrees
 !prompts/
 !prompts/**
 !git/
