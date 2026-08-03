@@ -8,10 +8,6 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 main() {
-  # Accept the key as an input if the caller already has it (e.g.
-  # approve-all-ai-work.sh reads it from each target repo's own local git
-  # config before invoking this script) — otherwise fall back to reading it
-  # from the current repo's git config, for standalone use.
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
   if [ -z "$OPENROUTER_API_KEY" ]; then
     echo -e "${RED}Error: OpenRouter API key not found for this project.${NC}"
@@ -62,13 +58,10 @@ main() {
   fi
   echo ""
 
-  # 3. Generate PR title and description via OpenRouter
   echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
-  # Images are binary and can be large — never send their contents to the AI,
-  # only which ones changed. IMAGE_EXCLUDES/IMAGE_PATHSPECS must stay in sync.
-  IMAGE_EXCLUDES=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
+  NON_SENT_IMAGE_EXTENSIONS=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   IMAGE_PATHSPECS=()
-  for pattern in "${IMAGE_EXCLUDES[@]}"; do
+  for pattern in "${NON_SENT_IMAGE_EXTENSIONS[@]}"; do
     IMAGE_PATHSPECS+=(":!${pattern}")
   done
   DIFF_CONTENT=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
@@ -80,7 +73,7 @@ main() {
     DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${DELETED_FILES}"
   fi
 
-  CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${IMAGE_EXCLUDES[@]}")
+  CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${NON_SENT_IMAGE_EXTENSIONS[@]}")
   if [ -n "$CHANGED_IMAGES" ]; then
     DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${CHANGED_IMAGES}"
   fi
@@ -97,11 +90,6 @@ main() {
   PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
   echo "  - Calling AI API (OpenRouter)..."
-  # The prompt embeds the full diff, which routinely exceeds the OS's
-  # argv/environment size limit once a branch accumulates enough changes
-  # ("Argument list too long") -- so both the jq escaping step and the
-  # curl request body go through temp files instead of command-line
-  # arguments, neither of which is subject to that limit.
   PROMPT_TMPFILE="$(mktemp)"
   PAYLOAD_TMPFILE="$(mktemp)"
   RESPONSE_TMPFILE="$(mktemp)"
