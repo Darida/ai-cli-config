@@ -136,7 +136,7 @@ main() {
           }
         }
       },
-      reasoning: { effort: "none", exclude: true },
+      reasoning: { exclude: true },
       messages: [{ role: "user", content: $text }]
     }' > "$PAYLOAD_TMPFILE"
 
@@ -166,7 +166,7 @@ main() {
     RAW_CONTENT=$(jq -r '.choices[0].message.content // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
     PARSED_STATUS=$(echo "$RAW_CONTENT" | jq -r '.status // empty' 2>/dev/null || echo "")
 
-    if [ "$HTTP_CODE" = "200" ] && [ -n "$PARSED_STATUS" ]; then
+    if [ "$HTTP_CODE" = "200" ]; then
       if [ "$PARSED_STATUS" = "LGTM" ]; then
         STATUS="LGTM"
         AI_OUTPUT="LGTM"
@@ -178,6 +178,14 @@ main() {
         AI_OUTPUT="ACTION_REQUIRED"$'\n'"${FORMATTED_NOTES}"
         rm -f "$RESPONSE_TMPFILE"
         break
+      else
+        TRIMMED_CONTENT=$(echo "$RAW_CONTENT" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
+        if [ "$TRIMMED_CONTENT" = "LGTM" ]; then
+          STATUS="LGTM"
+          AI_OUTPUT="LGTM"
+          rm -f "$RESPONSE_TMPFILE"
+          break
+        fi
       fi
     fi
 
