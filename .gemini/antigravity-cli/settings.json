@@ -28,5 +28,8 @@
     "ask": [
       "command(gcloud)"
     ]
-  }
+  },
+  "trustedWorkspaces": [
+    "/home/daridagm/Critter-Genetics-Breeder-Workspace"
+  ]
 }
