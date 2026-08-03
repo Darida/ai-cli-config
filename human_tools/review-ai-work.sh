@@ -47,7 +47,11 @@ main() {
   log_info "[1/3] Verifying clean working tree and extracting git diff against origin/main..."
 
   if ! git diff-index --quiet HEAD --; then
-    log_error "Error: Uncommitted changes detected. Please commit or stash your changes first."
+    local uncommitted_files
+    mapfile -t uncommitted_files < <(git status --porcelain | awk '{print $2}')
+    local count="${#uncommitted_files[@]}"
+    local sample="${uncommitted_files[0]:-unknown}"
+    log_error "Error: Uncommitted changes detected (${count} file(s) modified, e.g. ${sample}). Please commit or stash your changes first."
     git status
     exit 1
   fi

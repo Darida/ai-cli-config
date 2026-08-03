@@ -21,7 +21,11 @@ main() {
   # 1. Verify no unsubmitted changes in local git and check branch state
   echo -e "${YELLOW}[1/8] Verifying no uncommitted changes and branch state...${NC}"
   if ! git diff-index --quiet HEAD --; then
-    echo -e "${RED}Error: Uncommitted changes detected. Please commit or stash your changes first.${NC}"
+    local uncommitted_files
+    mapfile -t uncommitted_files < <(git status --porcelain | awk '{print $2}')
+    local count="${#uncommitted_files[@]}"
+    local sample="${uncommitted_files[0]:-unknown}"
+    log_error "Error: Uncommitted changes detected (${count} file(s) modified, e.g. ${sample}). Please commit or stash your changes first."
     git status
     exit 1
   fi
