@@ -109,9 +109,16 @@ main() {
     fi
   fi
 
+  HISTORY_FILE="$SCRIPT_DIR/history.json"
+  EXCLUDED_MODELS=$(get_excluded_models "$HISTORY_FILE")
+  if [ -n "$EXCLUDED_MODELS" ]; then
+    log_info "Excluding models with high failure rates: ${EXCLUDED_MODELS}"
+  fi
+
   jq -n \
     --rawfile text "$PROMPT_TMPFILE" \
     --arg model "$MODEL_NAME" \
+    --arg excluded "$EXCLUDED_MODELS" \
     '{
       model: $model,
       response_format: {
@@ -128,7 +135,15 @@ main() {
               },
               notes: {
                 type: "array",
-                items: { type: "string" }
+                items: {
+                  type: "object",
+                  properties: {
+                    rule: { type: "string" },
+                    text: { type: "string" }
+                  },
+                  required: ["rule", "text"],
+                  additionalProperties: false
+                }
               }
             },
             required: ["status", "notes"],
@@ -136,7 +151,7 @@ main() {
           }
         }
       },
-      reasoning: { effort: "none", exclude: true },
+      plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
       messages: [{ role: "user", content: $text }]
     }' > "$PAYLOAD_TMPFILE"
 
@@ -163,27 +178,42 @@ main() {
     HTTP_CODE=$(echo "$HTTP_CODE" | tr -d '\r\n[:space:]' | tail -c 3)
     [ -z "$HTTP_CODE" ] && HTTP_CODE="000"
 
-    RAW_CONTENT=$(jq -r '.choices[0].message.content // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
+    ACTUAL_MODEL=$(jq -r '.model // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "$MODEL_NAME")
+
+    RAW_CONTENT=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
     PARSED_STATUS=$(echo "$RAW_CONTENT" | jq -r '.status // empty' 2>/dev/null || echo "")
 
-    if [ "$HTTP_CODE" = "200" ] && [ -n "$PARSED_STATUS" ]; then
+    if [ "$HTTP_CODE" = "200" ]; then
       if [ "$PARSED_STATUS" = "LGTM" ]; then
         STATUS="LGTM"
         AI_OUTPUT="LGTM"
+        record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" 0
         rm -f "$RESPONSE_TMPFILE"
         break
       elif [ "$PARSED_STATUS" = "ACTION_REQUIRED" ]; then
         STATUS="ACTION_REQUIRED"
-        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- " + .' 2>/dev/null || echo "")
+        NOTES_COUNT=$(echo "$RAW_CONTENT" | jq -r '.notes | length' 2>/dev/null || echo 0)
+        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "**: " + (.text // .)' 2>/dev/null || echo "")
         AI_OUTPUT="ACTION_REQUIRED"$'\n'"${FORMATTED_NOTES}"
+        record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" "$NOTES_COUNT"
         rm -f "$RESPONSE_TMPFILE"
         break
+      else
+        TRIMMED_CONTENT=$(echo "$RAW_CONTENT" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
+        if [ "$TRIMMED_CONTENT" = "LGTM" ]; then
+          STATUS="LGTM"
+          AI_OUTPUT="LGTM"
+          record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" 0
+          rm -f "$RESPONSE_TMPFILE"
+          break
+        fi
       fi
     fi
 
-    # Attempt failed — preserve tmp file for debugging
+    # Attempt failed — preserve tmp file for debugging and record failure
+    record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "fail" 0
     FAILED_ATTEMPT_FILES+=("$RESPONSE_TMPFILE")
-    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}). Debug file: file://${RESPONSE_TMPFILE}"
+    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}). Debug file: file://${RESPONSE_TMPFILE}"
 
     ATTEMPT=$((ATTEMPT + 1))
     sleep 1
@@ -248,6 +278,82 @@ extract_git_diff() {
   fi
 
   echo "$diff_content"
+}
+
+get_excluded_models() {
+  local history_file="$1"
+  node -e '
+  const fs = require("fs");
+  const historyFile = process.argv[1];
+  let history = [];
+  try {
+    if (fs.existsSync(historyFile)) {
+      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    }
+  } catch (e) {
+    history = [];
+  }
+
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+  const weekStart = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const monthStart = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+
+  const failures = {};
+
+  for (const item of history) {
+    if (item.status !== "fail" || !item.model) continue;
+    const time = new Date(item.timestamp).getTime();
+    if (isNaN(time)) continue;
+
+    if (!failures[item.model]) {
+      failures[item.model] = { today: 0, week: 0, month: 0 };
+    }
+
+    if (time >= todayStart) failures[item.model].today++;
+    if (time >= weekStart) failures[item.model].week++;
+    if (time >= monthStart) failures[item.model].month++;
+  }
+
+  const excluded = [];
+  for (const [model, count] of Object.entries(failures)) {
+    if (count.today > 3 || count.week > 6 || count.month > 12) {
+      excluded.push(model);
+    }
+  }
+
+  console.log(excluded.join(" "));
+  ' "$history_file" 2>/dev/null || echo ""
+}
+
+record_history_entry() {
+  local history_file="$1"
+  local model_name="$2"
+  local status_val="$3"
+  local notes_cnt="$4"
+
+  node -e '
+  const fs = require("fs");
+  const historyFile = process.argv[1];
+  const entry = {
+    timestamp: new Date().toISOString(),
+    model: process.argv[2],
+    status: process.argv[3],
+    notes_count: parseInt(process.argv[4], 10) || 0
+  };
+
+  let history = [];
+  try {
+    if (fs.existsSync(historyFile)) {
+      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    }
+  } catch (e) {
+    history = [];
+  }
+
+  history.push(entry);
+  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), "utf8");
+  ' "$history_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
 }
 
 log_info() {

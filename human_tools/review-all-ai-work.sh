@@ -99,6 +99,11 @@ if [ "$WORKSPACE_HAD_CHANGES" -ne 0 ]; then
 fi
 
 echo ""
+git -C "$SCRIPT_DIR" add "$SCRIPT_DIR/history.json" 2>/dev/null || true
+if git -C "$SCRIPT_DIR" commit -m "chore(history): update AI review history log" 2>/dev/null; then
+    git -C "$SCRIPT_DIR" push origin ai-work 2>/dev/null || true
+fi
+
 if [ "${#FAILED_REPOS[@]}" -gt 0 ]; then
     echo "❌ AI code review failed for: ${FAILED_REPOS[*]}" >&2
     exit 1
