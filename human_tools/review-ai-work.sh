@@ -103,7 +103,8 @@ echo -e "${YELLOW}[2/3] Preparing prompt and sending to AI (OpenRouter)...${NC}"
 PROMPT_TMPFILE="$(mktemp)"
 PAYLOAD_TMPFILE="$(mktemp)"
 DIFF_TMPFILE="$(mktemp)"
-trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE"' EXIT
+RESPONSE_TMPFILE="$(mktemp)"
+trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE" "$RESPONSE_TMPFILE"' EXIT
 
 printf '%s' "$DIFF_CONTENT" > "$DIFF_TMPFILE"
 
@@ -154,24 +155,24 @@ while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
     echo -e "${YELLOW}Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)...${NC}"
   fi
 
-  HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  LAST_HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 180 -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
     -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE" || echo -e "\nHTTP_STATUS:000")
+    --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
 
-  LAST_HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2 || echo "000")
-  LAST_API_RESPONSE=$(echo "$HTTP_RESPONSE" | sed '/HTTP_STATUS:[0-9]*/d')
+  LAST_API_RESPONSE=$(cat "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
 
   if [ "$LAST_HTTP_CODE" != "200" ]; then
     echo -e "${RED}[ERROR] OpenRouter API call failed with HTTP status: ${LAST_HTTP_CODE}${NC}"
-    if [ -n "$LAST_API_RESPONSE" ]; then
-      echo -e "${RED}[ERROR] Response Body:${NC}\n${LAST_API_RESPONSE}"
+    CLEAN_ERROR=$(echo "$LAST_API_RESPONSE" | sed '/^[[:space:]]*$/d' | head -n 30)
+    if [ -n "$CLEAN_ERROR" ]; then
+      echo -e "${RED}[ERROR] Response Body:${NC}\n${CLEAN_ERROR}"
     else
       echo -e "${RED}[ERROR] Request timed out or network connection failed.${NC}"
     fi
   fi
 
-  RAW_OUTPUT=$(echo "$LAST_API_RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
+  RAW_OUTPUT=$(jq -r '.choices[0].message.content // empty' "$RESPONSE_TMPFILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || echo "")
 
   if [ -n "$RAW_OUTPUT" ]; then
     FIRST_LINE=$(echo "$RAW_OUTPUT" | head -n 1 | tr -d '\r' | xargs)
@@ -188,7 +189,8 @@ while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
   else
     if [ "$LAST_HTTP_CODE" = "200" ]; then
       echo -e "${YELLOW}[WARN] API returned HTTP 200 but payload contained no choice content.${NC}"
-      echo -e "${YELLOW}[DEBUG] Raw Response: ${LAST_API_RESPONSE}${NC}"
+      CLEAN_BODY=$(echo "$LAST_API_RESPONSE" | sed '/^[[:space:]]*$/d' | head -n 30)
+      echo -e "${YELLOW}[DEBUG] Response Body: ${CLEAN_BODY}${NC}"
     fi
   fi
 

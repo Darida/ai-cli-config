@@ -103,7 +103,8 @@ echo "  - Calling AI API (OpenRouter)..."
 # arguments, neither of which is subject to that limit.
 PROMPT_TMPFILE="$(mktemp)"
 PAYLOAD_TMPFILE="$(mktemp)"
-trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
+RESPONSE_TMPFILE="$(mktemp)"
+trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$RESPONSE_TMPFILE"' EXIT
 printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
 
 MODEL_NAME="openrouter/free"
@@ -123,20 +124,18 @@ fi
 
 jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
 
-HTTP_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --connect-timeout 15 --max-time 120 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 180 -X POST "https://openrouter.ai/api/v1/chat/completions" \
   -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
   -H "Content-Type: application/json" \
-  --data-binary "@$PAYLOAD_TMPFILE" || echo -e "\nHTTP_STATUS:000")
+  --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
 
-HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d: -f2 || echo "000")
-API_RESPONSE=$(echo "$HTTP_RESPONSE" | sed '/HTTP_STATUS:[0-9]*/d')
-
-AI_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null || echo "")
+API_RESPONSE=$(cat "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
+AI_OUTPUT=$(jq -r '.choices[0].message.content // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
 
 if [ -z "$AI_OUTPUT" ]; then
   echo -e "${RED}[ERROR] Failed to generate PR title and description (HTTP Status: ${HTTP_CODE})${NC}"
-  echo -e "${RED}[ERROR] Raw API Response:${NC}"
-  echo "$API_RESPONSE"
+  CLEAN_ERROR=$(echo "$API_RESPONSE" | sed '/^[[:space:]]*$/d' | head -n 30)
+  echo -e "${RED}[ERROR] Response Body:${NC}\n${CLEAN_ERROR}"
   exit 1
 fi
 
