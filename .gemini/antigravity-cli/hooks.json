@@ -1,5 +1,5 @@
 {
-  "hooks": {
+  "block-git-branch-changes": {
     "PreToolUse": [
       {
         "matcher": "run_command",
@@ -10,7 +10,9 @@
           }
         ]
       }
-    ],
+    ]
+  },
+  "question-readonly-note": {
     "UserPromptSubmit": [
       {
         "hooks": [

@@ -10,6 +10,7 @@
 !.gemini/antigravity-cli/
 !.gemini/antigravity-cli/settings.json
 !.gemini/antigravity-cli/hooks.json
+!.gemini/antigravity-cli/README.md
 !.gemini/policies
 !.gemini/settings.json
 !.gemini/hooks/
