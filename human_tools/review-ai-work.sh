@@ -181,9 +181,10 @@ main() {
     fi
 
     # Attempt failed — preserve tmp file for debugging and record failure
+    FAILURE_REASON=$(classify_response_failure "$RESPONSE_TMPFILE")
     record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "fail" 0
     FAILED_ATTEMPT_FILES+=("$RESPONSE_TMPFILE")
-    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}). Debug file: file://${RESPONSE_TMPFILE}"
+    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}, Reason: ${FAILURE_REASON}). Debug file: file://${RESPONSE_TMPFILE}"
 
     ATTEMPT=$((ATTEMPT + 1))
     sleep 1
@@ -345,6 +346,21 @@ get_excluded_models() {
 
   console.log(excluded.join(" "));
   ' "$history_file" 2>/dev/null || echo ""
+}
+
+classify_response_failure() {
+  local response_file="$1"
+  if [ ! -f "$response_file" ]; then
+    echo "unknown"
+    return
+  fi
+  local content_val
+  content_val=$(jq -r '.choices[0].message.content' "$response_file" 2>/dev/null || echo "")
+  if [ "$content_val" = "null" ]; then
+    echo "empty response"
+  else
+    echo "unknown"
+  fi
 }
 
 format_uncommitted_changes_summary() {
