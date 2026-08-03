@@ -130,5 +130,23 @@
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
     "notes_count": 0
+  },
+  {
+    "timestamp": "2026-08-03T18:29:31.805Z",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "status": "success",
+    "notes_count": 2
+  },
+  {
+    "timestamp": "2026-08-03T18:31:44.398Z",
+    "model": "openai/gpt-oss-20b:free",
+    "status": "fail",
+    "notes_count": 0
+  },
+  {
+    "timestamp": "2026-08-03T18:31:56.376Z",
+    "model": "google/gemma-4-26b-a4b-it:free",
+    "status": "success",
+    "notes_count": 0
   }
 ]
