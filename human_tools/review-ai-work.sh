@@ -44,7 +44,7 @@ main() {
     fi
   fi
 
-  log_info "[1/3] Verifying clean working tree and extracting git diff against ${BASE_REF}..."
+  log_info "[1/3] Verifying clean working tree and extracting git diff against origin/main..."
 
   if ! git diff-index --quiet HEAD --; then
     log_error "Error: Uncommitted changes detected. Please commit or stash your changes first."
@@ -53,10 +53,10 @@ main() {
   fi
   log_success "✓ Working tree is clean"
 
-  DIFF_CONTENT=$(extract_git_diff "$BASE_REF")
+  DIFF_CONTENT=$(extract_git_diff)
 
   if [ -z "$DIFF_CONTENT" ]; then
-    log_success "✓ No diff found against ${BASE_REF}. Nothing to review."
+    log_success "✓ No diff found against origin/main. Nothing to review."
     exit 0
   fi
 
@@ -209,7 +209,6 @@ main() {
 }
 
 extract_git_diff() {
-  local base_ref="$1"
   local image_excludes=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   local image_pathspecs=()
   for pattern in "${image_excludes[@]}"; do
@@ -223,9 +222,7 @@ extract_git_diff() {
   done
 
   local diff_content=""
-  if git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
-    diff_content=$(git diff --diff-filter=d "$base_ref"...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || git diff --diff-filter=d "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" || echo "")
-  fi
+  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
 
   if [ -n "$diff_content" ]; then
     diff_content=$(node -e '
@@ -255,19 +252,19 @@ extract_git_diff() {
   fi
 
   local deleted_files
-  deleted_files=$(git diff --diff-filter=D --name-only "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
+  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
   if [ -n "$deleted_files" ]; then
     diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
 
   local changed_images
-  changed_images=$(git diff --name-only "$base_ref" -- "${image_excludes[@]}" 2>/dev/null || echo "")
+  changed_images=$(git diff --name-only origin/main...HEAD -- "${image_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_images" ]; then
     diff_content="${diff_content}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${changed_images}"
   fi
 
   local changed_md
-  changed_md=$(git diff --name-only "$base_ref" -- "${md_excludes[@]}" 2>/dev/null || echo "")
+  changed_md=$(git diff --name-only origin/main...HEAD -- "${md_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_md" ]; then
     diff_content="${diff_content}"$'\n\n'"Markdown files changed (contents omitted, filenames only):"$'\n'"${changed_md}"
   fi
