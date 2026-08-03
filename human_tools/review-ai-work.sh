@@ -109,51 +109,19 @@ main() {
     fi
   fi
 
+  SCHEMA_FILE="$SCRIPT_DIR/review.schema.json"
+  if [ ! -f "$SCHEMA_FILE" ]; then
+    log_error "Error: Schema file not found at $SCHEMA_FILE"
+    exit 1
+  fi
+
   HISTORY_FILE="$SCRIPT_DIR/history.json"
   EXCLUDED_MODELS=$(get_excluded_models "$HISTORY_FILE")
   if [ -n "$EXCLUDED_MODELS" ]; then
     log_info "Excluding models with high failure rates: ${EXCLUDED_MODELS}"
   fi
 
-  jq -n \
-    --rawfile text "$PROMPT_TMPFILE" \
-    --arg model "$MODEL_NAME" \
-    --arg excluded "$EXCLUDED_MODELS" \
-    '{
-      model: $model,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "code_review_response",
-          strict: true,
-          schema: {
-            type: "object",
-            properties: {
-              status: {
-                type: "string",
-                enum: ["LGTM", "ACTION_REQUIRED"]
-              },
-              notes: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    rule: { type: "string" },
-                    text: { type: "string" }
-                  },
-                  required: ["rule", "text"],
-                  additionalProperties: false
-                }
-              }
-            },
-            required: ["status", "notes"],
-            additionalProperties: false
-          }
-        }
-      },
-      plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
-      messages: [{ role: "user", content: $text }]
-    }' > "$PAYLOAD_TMPFILE"
+  build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" "$EXCLUDED_MODELS" > "$PAYLOAD_TMPFILE"
 
   MAX_RETRIES=3
   ATTEMPT=1
@@ -305,6 +273,33 @@ extract_git_diff() {
   fi
 
   echo "$diff_content"
+}
+
+build_openrouter_payload() {
+  local prompt_file="$1"
+  local schema_file="$2"
+  local model_name="$3"
+  local excluded_models="$4"
+
+  jq -n \
+    --rawfile text "$prompt_file" \
+    --rawfile schema "$schema_file" \
+    --arg model "$model_name" \
+    --arg excluded "$excluded_models" \
+    '{
+      model: $model,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_review_response",
+          strict: true,
+          schema: ($schema | fromjson)
+        }
+      },
+      reasoning: { exclude: true },
+      plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
+      messages: [{ role: "user", content: $text }]
+    }'
 }
 
 get_excluded_models() {

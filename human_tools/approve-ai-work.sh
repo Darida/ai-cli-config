@@ -58,86 +58,53 @@ main() {
   fi
   echo ""
 
-  echo -e "${YELLOW}[3/8] Generating PR title and description from diff...${NC}"
-  NON_SENT_IMAGE_EXTENSIONS=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
-  IMAGE_PATHSPECS=()
-  for pattern in "${NON_SENT_IMAGE_EXTENSIONS[@]}"; do
-    IMAGE_PATHSPECS+=(":!${pattern}")
-  done
-  DIFF_CONTENT=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
+  log_info "[3/8] Generating PR title and description from diff..."
+  DIFF_CONTENT=$(extract_git_diff_for_approval)
 
-  # Deleted files can be large (e.g. a removed source file) and their full
-  # removed content is rarely useful for a PR description — list names only.
-  DELETED_FILES=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${IMAGE_PATHSPECS[@]}")
-  if [ -n "$DELETED_FILES" ]; then
-    DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${DELETED_FILES}"
-  fi
-
-  CHANGED_IMAGES=$(git diff --name-only origin/main...HEAD -- "${NON_SENT_IMAGE_EXTENSIONS[@]}")
-  if [ -n "$CHANGED_IMAGES" ]; then
-    DIFF_CONTENT="${DIFF_CONTENT}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${CHANGED_IMAGES}"
-  fi
-
-  # Load prompt template and substitute diff content
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PROMPT_FILE="$SCRIPT_DIR/approve-ai-work.commit_description_promt.md"
+  SCHEMA_FILE="$SCRIPT_DIR/approve-ai-work.commit_description.schema.json"
+
   if [ ! -f "$PROMPT_FILE" ]; then
-    echo -e "${RED}Error: Prompt file not found at $PROMPT_FILE${NC}"
+    log_error "Error: Prompt file not found at $PROMPT_FILE"
+    exit 1
+  fi
+  if [ ! -f "$SCHEMA_FILE" ]; then
+    log_error "Error: Schema file not found at $SCHEMA_FILE"
     exit 1
   fi
 
   PROMPT_CONTENT=$(cat "$PROMPT_FILE")
   PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
-  echo "  - Calling AI API (OpenRouter)..."
+  log_info "  - Calling AI API (OpenRouter)..."
   PROMPT_TMPFILE="$(mktemp)"
   PAYLOAD_TMPFILE="$(mktemp)"
-  RESPONSE_TMPFILE="$(mktemp)"
-  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$RESPONSE_TMPFILE"' EXIT
+  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
   printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
 
   MODEL_NAME="openrouter/free"
   PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
   PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
   if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
-    echo -e "${YELLOW}Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold.${NC}"
-    echo -e "${YELLOW}A paid model (openrouter/auto) will be used for this PR description.${NC}"
+    log_info "Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold."
+    log_info "A paid model (openrouter/auto) will be used for this PR description."
     read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      echo -e "${RED}Aborted before sending request.${NC}"
+      log_error "Aborted before sending request."
       exit 1
     fi
     MODEL_NAME="openrouter/auto"
   fi
 
-  jq -n --rawfile text "$PROMPT_TMPFILE" --arg model "$MODEL_NAME" '{model: $model, messages: [{role: "user", content: $text}]}' > "$PAYLOAD_TMPFILE"
+  build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" > "$PAYLOAD_TMPFILE"
 
-  HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
-    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-    -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
+  PR_TITLE=""
+  PR_DESCRIPTION=""
+  execute_approval_retries "$PAYLOAD_TMPFILE" "$MODEL_NAME" "$OPENROUTER_API_KEY"
 
-  API_RESPONSE=$(cat "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
-  AI_OUTPUT=$(extract_pr_description_content "$RESPONSE_TMPFILE")
-
-  if [ -z "$AI_OUTPUT" ]; then
-    handle_api_failure "$HTTP_CODE" "$API_RESPONSE"
-  fi
-
-  # Parse TITLE and DESCRIPTION from output
-  PR_TITLE=$(echo "$AI_OUTPUT" | sed -n 's/^TITLE: //p' | head -1)
-  # Extract everything after "DESCRIPTION:" preserving newlines and formatting
-  PR_DESCRIPTION=$(echo "$AI_OUTPUT" | awk '/^DESCRIPTION:/ {flag=1; sub(/^DESCRIPTION:[ ]*/, ""); if (NF) print; next} flag')
-
-  if [ -z "$PR_TITLE" ] || [ -z "$PR_DESCRIPTION" ]; then
-    echo -e "${RED}Error: Invalid AI output format. Expected TITLE: ... DESCRIPTION: ...${NC}"
-    echo -e "${RED}Got:${NC}"
-    echo "$AI_OUTPUT"
-    exit 1
-  fi
-
-  echo -e "${GREEN}✓ PR title and description generated${NC}\n"
+  log_success "✓ PR title and description generated\n"
 
   # 4. Validate and request approval for generated content
   echo -e "${YELLOW}[4/8] Validating and requesting approval...${NC}"
@@ -220,21 +187,130 @@ main() {
   echo -e "${GREEN}✓ ai-work branch history reset and ready for new work${NC}"
 }
 
-extract_pr_description_content() {
-  local response_file="$1"
-  jq -r '.choices[0].message.content // empty' "$response_file" 2>/dev/null || echo ""
+  echo -e "${GREEN}✓ ai-work branch history reset and ready for new work${NC}"
 }
 
-handle_api_failure() {
-  local http_code="$1"
-  local response="$2"
-  echo -e "${RED}[ERROR] Failed to generate PR title and description (HTTP Status: ${http_code})${NC}"
-  local clean_error
-  clean_error=$(echo "$response" | sed '/^[[:space:]]*$/d' | head -n 30)
-  if [ -n "$clean_error" ]; then
-    echo -e "${RED}[ERROR] Response Body:${NC}\n${clean_error}"
+extract_git_diff_for_approval() {
+  local non_sent_image_extensions=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
+  local image_pathspecs=()
+  for pattern in "${non_sent_image_extensions[@]}"; do
+    image_pathspecs+=(":!${pattern}")
+  done
+
+  local diff_content
+  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}")
+
+  local deleted_files
+  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}")
+  if [ -n "$deleted_files" ]; then
+    diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
+
+  local changed_images
+  changed_images=$(git diff --name-only origin/main...HEAD -- "${non_sent_image_extensions[@]}")
+  if [ -n "$changed_images" ]; then
+    diff_content="${diff_content}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${changed_images}"
+  fi
+
+  echo "$diff_content"
+}
+
+execute_approval_retries() {
+  local payload_tmpfile="$1"
+  local model_name="$2"
+  local api_key="$3"
+
+  local max_retries=3
+  local attempt=1
+  local failed_attempt_files=()
+
+  while [ "$attempt" -le "$max_retries" ]; do
+    local response_tmpfile
+    response_tmpfile=$(mktemp "/tmp/approve_attempt_${attempt}_XXXXXX.json")
+
+    if [ "$attempt" -gt 1 ]; then
+      log_info "[Attempt $attempt/$max_retries] Retrying API call to OpenRouter (${model_name})..."
+    else
+      log_info "Sending request to OpenRouter API (${model_name})..."
+    fi
+
+    local http_code
+    http_code=$(curl -s -w "%{http_code}" -o "$response_tmpfile" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+      -H "Authorization: Bearer ${api_key}" \
+      -H "Content-Type: application/json" \
+      --data-binary "@$payload_tmpfile" || echo "000")
+
+    http_code=$(echo "$http_code" | tr -d '\r\n[:space:]' | tail -c 3)
+    [ -z "$http_code" ] && http_code="000"
+
+    local raw_content
+    raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
+
+    local parsed_title
+    parsed_title=$(echo "$raw_content" | jq -r '.title // empty' 2>/dev/null || echo "")
+    local parsed_desc
+    parsed_desc=$(echo "$raw_content" | jq -r '.description // empty' 2>/dev/null || echo "")
+
+    if [ "$http_code" = "200" ] && [ -n "$parsed_title" ] && [ -n "$parsed_desc" ]; then
+      PR_TITLE="$parsed_title"
+      PR_DESCRIPTION="$parsed_desc"
+      rm -f "$response_tmpfile"
+      return 0
+    fi
+
+    failed_attempt_files+=("$response_tmpfile")
+    log_error "[ERROR] Attempt $attempt/$max_retries failed (HTTP Status: ${http_code}). Debug file: file://${response_tmpfile}"
+
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  log_error "Error: Failed to obtain valid PR title and description after $max_retries attempts."
+  log_error "Preserved attempt debug files:"
+  for f in "${failed_attempt_files[@]}"; do
+    log_error "  - file://${f}"
+  done
   exit 1
+}
+
+build_openrouter_payload() {
+  local prompt_file="$1"
+  local schema_file="$2"
+  local model_name="$3"
+
+  jq -n \
+    --rawfile text "$prompt_file" \
+    --rawfile schema "$schema_file" \
+    --arg model "$model_name" \
+    '{
+      model: $model,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "pr_description_response",
+          strict: true,
+          schema: ($schema | fromjson)
+        }
+      },
+      reasoning: { exclude: true },
+      messages: [{ role: "user", content: $text }]
+    }'
+}
+
+timestamp() {
+  date "+%Y-%m-%d %H:%M:%S"
+}
+
+log_info() {
+  echo -e "${YELLOW}[$(timestamp)] $1${NC}"
+}
+
+log_success() {
+  echo -e "${GREEN}[$(timestamp)] $1${NC}"
+}
+
+log_error() {
+  echo -e "${RED}[$(timestamp)] $1${NC}"
 }
 
 main "$@"
