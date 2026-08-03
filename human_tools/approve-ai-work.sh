@@ -21,11 +21,9 @@ main() {
   # 1. Verify no unsubmitted changes in local git and check branch state
   echo -e "${YELLOW}[1/8] Verifying no uncommitted changes and branch state...${NC}"
   if ! git diff-index --quiet HEAD --; then
-    local uncommitted_files
-    mapfile -t uncommitted_files < <(git status --porcelain | awk '{print $2}')
-    local count="${#uncommitted_files[@]}"
-    local sample="${uncommitted_files[0]:-unknown}"
-    log_error "Error: Uncommitted changes detected (${count} file(s) modified, e.g. ${sample}). Please commit or stash your changes first."
+    local summary
+    summary=$(format_uncommitted_changes_summary)
+    log_error "Error: Uncommitted changes detected (${summary}). Please commit or stash your changes first."
     git status
     exit 1
   fi
@@ -296,6 +294,16 @@ build_openrouter_payload() {
       reasoning: { exclude: true },
       messages: [{ role: "user", content: $text }]
     }'
+}
+
+format_uncommitted_changes_summary() {
+  local uncommitted_files=()
+  mapfile -t uncommitted_files < <(git status --porcelain | sed -E 's/^.. //' | grep -v '^[[:space:]]*$')
+  local count="${#uncommitted_files[@]}"
+  local file_list
+  file_list=$(printf '%s, ' "${uncommitted_files[@]}")
+  file_list="${file_list%, }"
+  echo "${count} file(s) modified: ${file_list}"
 }
 
 timestamp() {

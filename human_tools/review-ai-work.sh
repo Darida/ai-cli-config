@@ -47,11 +47,9 @@ main() {
   log_info "[1/3] Verifying clean working tree and extracting git diff against origin/main..."
 
   if ! git diff-index --quiet HEAD --; then
-    local uncommitted_files
-    mapfile -t uncommitted_files < <(git status --porcelain | awk '{print $2}')
-    local count="${#uncommitted_files[@]}"
-    local sample="${uncommitted_files[0]:-unknown}"
-    log_error "Error: Uncommitted changes detected (${count} file(s) modified, e.g. ${sample}). Please commit or stash your changes first."
+    local summary
+    summary=$(format_uncommitted_changes_summary)
+    log_error "Error: Uncommitted changes detected (${summary}). Please commit or stash your changes first."
     git status
     exit 1
   fi
@@ -347,6 +345,16 @@ get_excluded_models() {
 
   console.log(excluded.join(" "));
   ' "$history_file" 2>/dev/null || echo ""
+}
+
+format_uncommitted_changes_summary() {
+  local uncommitted_files=()
+  mapfile -t uncommitted_files < <(git status --porcelain | sed -E 's/^.. //' | grep -v '^[[:space:]]*$')
+  local count="${#uncommitted_files[@]}"
+  local file_list
+  file_list=$(printf '%s, ' "${uncommitted_files[@]}")
+  file_list="${file_list%, }"
+  echo "${count} file(s) modified: ${file_list}"
 }
 
 record_history_entry() {
