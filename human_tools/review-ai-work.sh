@@ -259,6 +259,33 @@ extract_git_diff() {
     diff_content=$(git diff --diff-filter=d "$base_ref"...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || git diff --diff-filter=d "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" || echo "")
   fi
 
+  if [ -n "$diff_content" ]; then
+    diff_content=$(node -e '
+    const raw = process.argv[1];
+    const lines = raw.split("\n");
+    const out = [];
+    let count = 0;
+
+    const flush = () => {
+      if (count > 0) {
+        out.push(`<deleted ${count} ${count === 1 ? "line" : "lines"}>`);
+        count = 0;
+      }
+    };
+
+    for (const line of lines) {
+      if (line.startsWith("-") && !line.startsWith("--- ")) {
+        count++;
+      } else {
+        flush();
+        out.push(line);
+      }
+    }
+    flush();
+    console.log(out.join("\n"));
+    ' "$diff_content")
+  fi
+
   local deleted_files
   deleted_files=$(git diff --diff-filter=D --name-only "$base_ref" -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
   if [ -n "$deleted_files" ]; then
@@ -331,10 +358,11 @@ record_history_entry() {
   local model_name="$2"
   local status_val="$3"
   local notes_cnt="$4"
+  local pending_file="/tmp/review_history_pending.json"
 
   node -e '
   const fs = require("fs");
-  const historyFile = process.argv[1];
+  const pendingFile = process.argv[1];
   const entry = {
     timestamp: new Date().toISOString(),
     model: process.argv[2],
@@ -344,16 +372,16 @@ record_history_entry() {
 
   let history = [];
   try {
-    if (fs.existsSync(historyFile)) {
-      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    if (fs.existsSync(pendingFile)) {
+      history = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
     }
   } catch (e) {
     history = [];
   }
 
   history.push(entry);
-  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), "utf8");
-  ' "$history_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
+  fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
+  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
 }
 
 log_info() {

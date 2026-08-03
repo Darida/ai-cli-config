@@ -691,11 +691,16 @@ type Store interface {
   interface (`interface{ GetRequestId() string }`, which protoc-gen-go
   generates for free) — no per-message registration needed to detect
   and read the key.
-- **Replaying a stored response is not fully generic** — the
-  interceptor needs to know the *type* to unmarshal into, which needs a
-  small per-service `procedure → zero-value response` registration,
-  the same shape as this pattern's own validation registry. Be upfront
-  about this rather than promising a fully automatic mechanism.
+- **Replaying a stored response is also fully generic**: the
+  interceptor scans every service in `protoregistry.GlobalFiles`
+  (populated automatically by every generated proto package on import)
+  for the RPC method whose request type matches the replayed request,
+  takes that method's output descriptor, and unmarshals into a
+  `dynamicpb.Message` built from it — connect's own transport only ever
+  needs a `proto.Message` to marshal onto the wire,
+  so no per-service response-type registration exists to maintain. A new
+  RPC opts into idempotency by adding `request_id` to its request
+  message alone.
 - **Lease duration is `ctx.Deadline()`**, not a separately configured
   constant: well-behaved code respects context cancellation, so once a
   deadline passes, the original attempt should have already stopped on
