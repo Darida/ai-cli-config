@@ -1,14 +1,7 @@
 #!/bin/bash
-# Claude Code status line.
-#
-# Shows:
-#   1. The actual model in use (resolved via the transcript so auto-routing
-#      shows the real underlying model, not just the "auto" alias).
-#   2. Context window usage as a percentage.
-#   3. 5-hour / 7-day rate-limit usage; once either crosses 70% it also shows
-#      the time remaining until that window resets.
-#   4. +/- line diff between the remote 'main' and remote 'ai-work' branches,
-#      queried live from the GitHub API (never the local git tree).
+# Claude Code status line. The branch diff segment is queried live from the
+# GitHub API rather than the local git tree, so it stays accurate even in a
+# sparse checkout where most files aren't present to diff locally.
 
 # ---------- colors ----------
 c_reset=$'\033[0m'
@@ -71,8 +64,7 @@ get_branch_diff_str() {
     fi
   fi
 
-  # API call failed (branch missing, offline, rate-limited, etc.) -- reuse
-  # the last known-good value if we have one rather than showing nothing.
+  # API call failed -- fall back to the last known-good value instead of showing nothing.
   [ -f "$cache_file" ] && sed -n '2p' "$cache_file"
 }
 
@@ -123,10 +115,8 @@ get_rate_limit_str() {
   echo "$rate_str"
 }
 
-# Fallback: if Claude Code didn't supply workspace.repo, derive owner/name from
-# the local git remote URL. This only reads the remote's *name*, never its
-# state -- the actual diff still comes from a live GitHub API call.
-# Prints "owner repo host" (space-separated) or nothing if unresolvable.
+# Prints "owner repo host". Falls back to parsing the local git remote's URL
+# for the name only -- the diff itself always comes from a live API call.
 resolve_repo_coords() {
   local owner repo host project_dir remote_url parsed
   owner=$(echo "$input" | jq -r '.workspace.repo.owner // empty')
@@ -147,8 +137,7 @@ resolve_repo_coords() {
   echo "$owner $repo $host"
 }
 
-# Fetches the raw GitHub compare API response for owner/repo, preferring
-# `gh` (already authenticated) and falling back to a bare curl.
+# Prefers `gh` since it's already authenticated; curl needs an explicit token.
 fetch_compare_json() {
   local owner="$1" repo="$2" compare_json="" auth_header=()
   if have gh; then
@@ -202,8 +191,7 @@ get_model_display() {
   fi
 }
 
-# Reads the cached diff_str for owner/repo if it's still within TTL.
-# Prints nothing (and returns 1) on a miss.
+# Returns 1 (no output) on a cache miss so callers can fall through to a live fetch.
 read_diff_cache() {
   local cache_file="$1" ttl="$2" now_ts cached_ts
   [ -f "$cache_file" ] || return 1
