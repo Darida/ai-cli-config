@@ -1,49 +1,18 @@
-# 1. Ignore absolutely everything in the home directory by default
-*
-**/
+# Track everything by default; only exclude local/vendored/generated
+# content below.
 
-# 2. Track the .gitignore file itself
-!.gitignore
+# Claude Code local, machine-specific overrides — never shared.
+.claude/settings.local.json
 
-# 3. Track only specific Gemini files
-!.gemini/
-!.gemini/antigravity-cli/
-!.gemini/antigravity-cli/settings.json
-!.gemini/antigravity-cli/hooks.json
-!.gemini/antigravity-cli/README.md
-!.gemini/policies
-!.gemini/settings.json
-!.gemini/hooks/
-!.gemini/hooks/**
+# Python bytecode cache.
+**/__pycache__/
 
-# 4. Track only specific Claude files
-!.claude/
-!.claude/settings.json
-!.claude/statusline-command.sh
-!.claude/hooks/
-!.claude/hooks/**
+# Docs pulled down by the antigravity CLI itself, not authored content.
+.gemini/antigravity-cli/docs/
 
-# 5. Track human_tools scripts
-!human_tools/
-!human_tools/**
+# Generated npm dependencies inside image-gen.
+image-gen/node_modules/
 
-# 6. Shared configuration subtrees
-!prompts/
-!prompts/**
-!git/
-!git/**
-!image-gen/
-!image-gen/**
-
-# 7. Track skill files
-!skills/
-!skills/**
-
-# 8. Never track generated dependencies inside image-gen (e.g. image-gen's
-#    own node_modules, installed by git/setup) — parent dirs are included
-#    above, this re-excludes just the generated subtree.
-image-gen/**/node_modules/
-
-# 9. Single-person workspace, no CI reinstalling from scratch — lockfile
-#    reproducibility across contributors/machines isn't needed here.
-image-gen/**/package-lock.json
+# Single-person workspace, no CI reinstalling from scratch — lockfile
+# reproducibility across contributors/machines isn't needed here.
+**/package-lock.json
