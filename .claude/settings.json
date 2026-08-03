@@ -51,7 +51,6 @@
       }
     ]
   },
-  "workflowKeywordTriggerEnabled": false,
   "statusLine": {
     "type": "command",
     "command": "bash /home/daridagm/.claude/statusline-command.sh"
