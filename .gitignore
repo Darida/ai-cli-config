@@ -4,9 +4,6 @@
 # Claude Code local, machine-specific overrides — never shared.
 .claude/settings.local.json
 
-# Python bytecode cache.
-**/__pycache__/
-
 # Docs pulled down by the antigravity CLI itself, not authored content.
 .gemini/antigravity-cli/docs/
 
