@@ -40,9 +40,7 @@ main() {
     WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
     WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
 
-    COMMIT_MSG="$MESSAGE
-
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+    COMMIT_MSG="$MESSAGE"
 
     while IFS= read -r name; do
         [ -z "$name" ] && continue
