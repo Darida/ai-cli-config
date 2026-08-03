@@ -28,29 +28,42 @@
 # that just failed.
 set -euo pipefail
 
-if [ "$#" -lt 1 ] || [ -z "$1" ]; then
-    echo "❌ usage: push-all \"<commit message>\"" >&2
-    exit 1
-fi
-MESSAGE="$1"
+main() {
+    if [ "$#" -lt 1 ] || [ -z "$1" ]; then
+        echo "❌ usage: push-all \"<commit message>\"" >&2
+        exit 1
+    fi
+    MESSAGE="$1"
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-CONFIG_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
+    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+    CONFIG_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+    WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
+    WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
 
-COMMIT_MSG="$MESSAGE
+    COMMIT_MSG="$MESSAGE
 
 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>"
+
+    while IFS= read -r name; do
+        [ -z "$name" ] && continue
+        repo="$WORKSPACE_ROOT/$name"
+        [ -e "$repo/.git" ] && commit_and_push "$repo" "$name"
+    done < <(list_submodule_paths)
+
+    commit_and_push "$WORKSPACE_ROOT" "workspace root"
+
+    echo "✅ push-all done"
+}
 
 commit_and_push() {
     local repo="$1"
     local name="$2"
+    local branch
+    branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
 
-    # Assignment kept on its own line, not combined with `local` - a
-    # `local x=$(cmd)` masks cmd's exit status (local's own status wins
-    # instead), which would silently turn a real git failure here into a
-    # false "nothing to commit" instead of aborting the script.
+    sync_remote_branch "$repo" "$name" "$branch"
+    sync_remote_main "$repo" "$name" "$branch"
+
     local status_output
     status_output="$(git -C "$repo" status --porcelain)"
     if [ -n "$status_output" ]; then
@@ -61,15 +74,6 @@ commit_and_push() {
         echo "⏭️  $name: nothing to commit"
     fi
 
-    local branch
-    branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
-
-    # Push independently of whether this call just committed anything —
-    # a clean working tree doesn't mean nothing needs pushing. A prior
-    # run can leave local commits stranded ahead of the remote (e.g. a
-    # pre-push hook rejecting that run's push after its commit already
-    # succeeded), and those must still go out here rather than being
-    # silently skipped because there was nothing new to commit this time.
     if git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
         local ahead
         ahead="$(git -C "$repo" rev-list --count "origin/$branch..HEAD")"
@@ -83,6 +87,50 @@ commit_and_push() {
     git -C "$repo" push origin "$branch"
 }
 
+sync_remote_branch() {
+    local repo="$1"
+    local name="$2"
+    local branch="$3"
+
+    git -C "$repo" fetch origin "$branch" --quiet 2>/dev/null || true
+
+    if git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+        local behind
+        behind="$(git -C "$repo" rev-list --count "HEAD..origin/$branch")"
+        if [ "$behind" -gt 0 ]; then
+            echo "🔄 $name: syncing $behind commit(s) from origin/$branch..."
+            if ! git -C "$repo" merge "origin/$branch" --no-edit; then
+                echo "❌ $name: merge conflict syncing from origin/$branch. Aborting merge." >&2
+                git -C "$repo" merge --abort 2>/dev/null || true
+                exit 1
+            fi
+        fi
+    fi
+}
+
+sync_remote_main() {
+    local repo="$1"
+    local name="$2"
+    local branch="$3"
+
+    [ "$branch" = "main" ] && return 0
+
+    git -C "$repo" fetch origin main --quiet 2>/dev/null || true
+
+    if git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/main" >/dev/null; then
+        local behind_main
+        behind_main="$(git -C "$repo" rev-list --count "HEAD..origin/main")"
+        if [ "$behind_main" -gt 0 ]; then
+            echo "🔄 $name: syncing $behind_main commit(s) from origin/main..."
+            if ! git -C "$repo" merge origin/main --no-edit; then
+                echo "❌ $name: merge conflict syncing from origin/main. Aborting merge." >&2
+                git -C "$repo" merge --abort 2>/dev/null || true
+                exit 1
+            fi
+        fi
+    fi
+}
+
 list_submodule_paths() {
     if [ -f "$WORKSPACE_ROOT/.gitmodules" ]; then
         git config --file "$WORKSPACE_ROOT/.gitmodules" --get-regexp '\.path$' | awk '{print $2}'
@@ -94,12 +142,4 @@ list_submodule_paths() {
     fi
 }
 
-while IFS= read -r name; do
-    [ -z "$name" ] && continue
-    repo="$WORKSPACE_ROOT/$name"
-    [ -e "$repo/.git" ] && commit_and_push "$repo" "$name"
-done < <(list_submodule_paths)
-
-commit_and_push "$WORKSPACE_ROOT" "workspace root"
-
-echo "✅ push-all done"
+main "$@"
