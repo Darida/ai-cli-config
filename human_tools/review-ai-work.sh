@@ -331,10 +331,11 @@ record_history_entry() {
   local model_name="$2"
   local status_val="$3"
   local notes_cnt="$4"
+  local pending_file="/tmp/review_history_pending.json"
 
   node -e '
   const fs = require("fs");
-  const historyFile = process.argv[1];
+  const pendingFile = process.argv[1];
   const entry = {
     timestamp: new Date().toISOString(),
     model: process.argv[2],
@@ -344,16 +345,16 @@ record_history_entry() {
 
   let history = [];
   try {
-    if (fs.existsSync(historyFile)) {
-      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    if (fs.existsSync(pendingFile)) {
+      history = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
     }
   } catch (e) {
     history = [];
   }
 
   history.push(entry);
-  fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), "utf8");
-  ' "$history_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
+  fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
+  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
 }
 
 log_info() {
