@@ -3,11 +3,11 @@
 # (recursively) -- e.g. run from a workspace root, it syncs the workspace
 # and all its project submodules in one shot.
 #
-# Per repo: fetch, fast-forward its own branch from its own remote (picks
-# up commits already pushed from another machine), then merge in main.
-# Always merges, never rebases -- these are shared branches synced across
-# machines, and rebasing would rewrite commit hashes anyone else has
-# already fetched.
+# Per repo: fetch, then bring its own branch up to date with its own remote
+# (fast-forwards when possible, merges when it has diverged -- e.g. commits
+# made on another machine), then merges in main. Always merges, never
+# rebases -- these are shared branches synced across machines, and rebasing
+# would rewrite commit hashes anyone else has already fetched.
 #
 # The repo you're standing in must have a clean tree, or the whole run
 # aborts before touching anything. Submodules found underneath are
@@ -80,8 +80,12 @@ sync_branch() {
     local behind
     behind="$(git -C "$repo" rev-list --count "HEAD..origin/$branch")"
     if [ "$behind" -gt 0 ]; then
-      echo "  - $name: fast-forwarding $behind commit(s) from origin/$branch..."
-      git -C "$repo" merge --ff-only "origin/$branch"
+      if git -C "$repo" merge --ff-only --quiet "origin/$branch" 2>/dev/null; then
+        echo "  - $name: fast-forwarded $behind commit(s) from origin/$branch"
+      else
+        echo "  - $name: origin/$branch has diverged, merging $behind commit(s)..."
+        merge_or_skip "$repo" "$name" "$is_root" "origin/$branch" || return 0
+      fi
     fi
   fi
 
@@ -90,16 +94,7 @@ sync_branch() {
     behind_main="$(git -C "$repo" rev-list --count "HEAD..origin/$main_branch")"
     if [ "$behind_main" -gt 0 ]; then
       echo "  - $name: merging $behind_main commit(s) from origin/$main_branch..."
-      if ! git -C "$repo" merge "origin/$main_branch" --no-edit; then
-        git -C "$repo" merge --abort
-        if [ "$is_root" = "true" ]; then
-          echo -e "${RED}Error: Merge conflict merging origin/$main_branch into $branch. Aborting merge, tree untouched.${NC}" >&2
-          echo -e "${YELLOW}Resolve manually with:${NC} git -C \"$repo\" merge origin/$main_branch"
-          exit 1
-        fi
-        echo -e "${RED}✗ $name: merge conflict merging origin/$main_branch, skipping${NC}" >&2
-        return 0
-      fi
+      merge_or_skip "$repo" "$name" "$is_root" "origin/$main_branch" || return 0
     fi
   fi
 
@@ -113,6 +108,28 @@ sync_branch() {
   fi
 
   echo -e "${GREEN}✓ $name synced${NC}"
+}
+
+# Merges $ref into $repo's current branch. Non-conflicting changes (different
+# files/lines, or identical edits on both sides) merge automatically -- that's
+# git's three-way merge doing its job, not special-cased here. On a genuine
+# conflict, aborts the merge (tree left untouched) and either exits the whole
+# script (root repo) or returns 1 so the caller skips the rest of this repo.
+merge_or_skip() {
+  local repo="$1" name="$2" is_root="$3" ref="$4"
+
+  if git -C "$repo" merge "$ref" --no-edit; then
+    return 0
+  fi
+
+  git -C "$repo" merge --abort
+  if [ "$is_root" = "true" ]; then
+    echo -e "${RED}Error: Merge conflict merging $ref. Aborting merge, tree untouched.${NC}" >&2
+    echo -e "${YELLOW}Resolve manually with:${NC} git -C \"$repo\" merge $ref"
+    exit 1
+  fi
+  echo -e "${RED}✗ $name: merge conflict merging $ref, skipping${NC}" >&2
+  return 1
 }
 
 # name|path pairs for every direct submodule of $repo.
