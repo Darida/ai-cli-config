@@ -1,27 +1,4 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "run_command",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.gemini/hooks/bash-guard/block-git-branch-changes.sh"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.gemini/hooks/prompt-guard/question-readonly-note.sh"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "command(git add)",
@@ -51,5 +28,8 @@
     "ask": [
       "command(gcloud)"
     ]
-  }
+  },
+  "trustedWorkspaces": [
+    "/home/daridagm/Critter-Genetics-Breeder-Workspace"
+  ]
 }
