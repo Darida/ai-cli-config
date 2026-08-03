@@ -18,13 +18,13 @@
       "Bash(git diff *)",
       "Bash(git reset *)"
     ],
-    "ask": [
-      "Bash(gcloud *)"
-    ],
     "deny": [
       "Bash(git branch -D*)",
       "Bash(git branch --delete*)",
       "Bash(cd *)"
+    ],
+    "ask": [
+      "Bash(gcloud *)"
     ],
     "defaultMode": "auto"
   },
@@ -51,6 +51,7 @@
       }
     ]
   },
+  "workflowKeywordTriggerEnabled": false,
   "statusLine": {
     "type": "command",
     "command": "bash /home/daridagm/.claude/statusline-command.sh"
