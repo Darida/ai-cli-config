@@ -8,13 +8,13 @@ wherever your project lives, e.g. from a project root that has this repo
 checked out as a sibling or submodule:
 
 ```
-../ai-cli-config/templates/image-gen/image-generation.sh generate_asset --assets-dir "$(pwd)/src/assets/prompts" building-arena
+../ai-cli-config/image-gen/image-generation.sh generate_asset --assets-dir "$(pwd)/src/assets/prompts" building-arena
 ```
 
 ## Setup (once per checkout)
 
 ```
-npm --prefix ai-cli-config/templates/image-gen install
+npm --prefix ai-cli-config/image-gen install
 ```
 
 (Already wired into `git/setup` if this is checked out inside a workspace

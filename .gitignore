@@ -27,19 +27,23 @@
 !human_tools/
 !human_tools/**
 
-# 6. Track template files (shared agent config, git hooks/scripts)
-!templates/
-!templates/**
+# 6. Shared configuration subtrees
+!prompts/
+!prompts/**
+!git/
+!git/**
+!image-gen/
+!image-gen/**
 
 # 7. Track skill files
 !skills/
 !skills/**
 
-# 8. Never track generated dependencies inside templates (e.g. image-gen's
+# 8. Never track generated dependencies inside image-gen (e.g. image-gen's
 #    own node_modules, installed by git/setup) — parent dirs are included
 #    above, this re-excludes just the generated subtree.
-templates/**/node_modules/
+image-gen/**/node_modules/
 
 # 9. Single-person workspace, no CI reinstalling from scratch — lockfile
 #    reproducibility across contributors/machines isn't needed here.
-templates/**/package-lock.json
+image-gen/**/package-lock.json

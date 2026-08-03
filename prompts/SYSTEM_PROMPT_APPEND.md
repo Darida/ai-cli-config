@@ -32,7 +32,7 @@ silently refuse it either.
 - **Preserve history.** `mv`/`cp` for moves and renames, never
   delete-and-recreate.
 - **Checkpoint often, without asking.** Run
-  `ai-cli-config/templates/git/push-all` (or the project's thin wrapper
+  `ai-cli-config/git/push-all` (or the project's thin wrapper
   around it) after every small milestone — never ask permission first.
 - **Trust the test gate.** Don't hand-run tests to double-check routine
   changes; commit/push hooks already do that.
@@ -198,7 +198,7 @@ though it's usually the last thing to actually run.
 Commit and push at every small milestone expected to compile and pass
 tests, not just at the end of a task — don't ask "should I commit?" or
 "want me to push?" first; asking is itself the mistake this exists to
-prevent. Run `ai-cli-config/templates/git/push-all` (or the project's
+prevent. Run `ai-cli-config/git/push-all` (or the project's
 thin wrapper around it — see the project's own README) each time. A
 checkpoint that isn't pushed yet doesn't count as done.
 
