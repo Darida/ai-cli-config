@@ -76,36 +76,48 @@ framework/             # the one exception to "no shared code" — see below
     module/
       module.go
 
-clients/               # a memoized binding to another service's own
-                        # generated Connect client — one package per
-                        # service *depended on*, shared by every service
-                        # that calls it (e.g. clients/bank/ for
-                        # BankService), never duplicated per consumer.
-                        # No wrapper type, no adapter, no hand-written
-                        # interface — a consuming service holds the
-                        # generated critterv1connect.XServiceClient
-                        # interface directly as its own dependency type
-                        # and calls it directly. See **Testing** below
-                        # for the full rationale.
+clients/               # a binding to another service's own generated
+                        # Connect client — one package per service
+                        # *depended on*, shared by every service that
+                        # calls it (e.g. clients/bank/ for BankService),
+                        # never duplicated per consumer. A consuming
+                        # service holds the generated
+                        # critterv1connect.XServiceClient interface
+                        # directly as its own dependency type and calls
+                        # it directly — no hand-written interface wraps
+                        # it. See **framework/inject** and **Testing**
+                        # below for how production vs. test construction
+                        # differs, and why an adapter exists at all.
   <dependency-name>/
-    fake/
-      fake_x_service_client.go  # FakeXServiceClient, implementing the
-                                 # real generated XServiceClient
-                                 # interface directly (embeds the
-                                 # generated UnimplementedXServiceHandler
-                                 # to cover methods no current consumer
-                                 # calls) — in its own subpackage so a
-                                 # test can import it for the concrete
-                                 # type, separate from module/
+    inproc/
+      inproc_x_service_client.go  # Adapter{ critterv1connect.XServiceClient }
+                                   # — anonymously embeds the generated
+                                   # client interface so every method
+                                   # forwards automatically once wired,
+                                   # with zero hand-written per-RPC
+                                   # forwarding code. Exists only to
+                                   # satisfy the Go compiler when two
+                                   # services depend on each other and a
+                                   # test needs to hand out a real,
+                                   # in-process implementation before
+                                   # that implementation itself has
+                                   # finished constructing — see
+                                   # **framework/inject** below. Never
+                                   # constructed in production.
     module/
-      module.go             # NewClient (binds and memoizes the real
-                             # critterv1connect.NewXServiceClient) +
-                             # NewForTesting (memoizes fake.NewFakeXServiceClient)
-                             # + Reset — wiring only, same split as
-                             # repository/impl + repository/module
-                             # elsewhere in this tree. Never the place
-                             # Client or FakeClient's own logic lives —
-                             # there is no logic here beyond binding.
+      module.go             # registers critterv1connect.XServiceClient
+                             # into framework/inject's registry (see
+                             # **framework/inject** below) — production
+                             # construct builds the real generated
+                             # client against this dependency's own base
+                             # URL; testing construct hands out an
+                             # unwired inproc.Adapter immediately, and
+                             # testing init points its embedded field at
+                             # the real, in-memory-backed *actions.Server
+                             # the owning service registers for that
+                             # same seed. Never the place any client
+                             # logic lives — there is no logic here
+                             # beyond wiring.
 
 services/
   <name>/
@@ -123,18 +135,31 @@ services/
       impl/
         store.go           # implementation; imports parent for errors
       module/
-        module.go           # NewXXXRepositoryForTesting() + NewFirestoreXXXRepository()
-                             # (or whatever the real backing store is) — see
+        module.go           # registers Repository into framework/inject's
+                             # registry — production registers the real
+                             # backing store, testing registers an
+                             # in-memory one — see
                              # **interface.go / impl/ / module/ Split** below
       <entity>_test.go
     core/
       <domain>/
         interface.go       # Manager interface + this package's own error sentinels
         impl/
-          manager.go
+          manager.go         # NewEmptyManager()/Wire(), split in two only
+                              # when this Manager is a genuine participant
+                              # in a cross-service dependency cycle — see
+                              # **framework/inject** below
         module/
-          module.go
+          module.go           # registers Manager into framework/inject's
+                               # registry, same production/testing split
+                               # as repository/module above
         <domain>_test.go
+    register/
+      register.go          # blank-imports this service's own
+                            # repository/module, every core/<domain>/module,
+                            # and actions/module packages for their init()
+                            # registration side effects — see
+                            # **framework/inject** below
     validation/
       XxxRequestValidator.go   # registered into a framework/validation.Registry
       XxxEntityValidator.go    # from this service's own service.go — see framework/ above
@@ -412,6 +437,89 @@ back to a generic internal message.
 
 ---
 
+## framework/inject — Dependency Registry & Cycle-Breaking
+
+`framework/inject` (production) and `framework/inject/testing` (tests)
+are what every `module/` package registers a type into, replacing
+hand-rolled `sync.Once` memoization and manual `Reset()` cascades with
+one small, generic mechanism, both halves the same shape:
+
+```go
+// framework/inject — process-wide, production
+func Register[T any](construct func() T, init func(T)) { ... }
+func Get[T any]() T { ... }
+
+// framework/inject/testing — identical shape, keyed per seed
+func Register[T any](construct func(seed string) T, init func(seed string, T)) { ... }
+func Get[T any](seed string) T { ... }
+```
+
+Each registered type gets a lazily-built, build-at-most-once value —
+one process-wide instance in production, one independent instance per
+test seed (`t.Name()` is the normal seed) in tests, so different tests,
+even parallel ones, never observe each other's value. `construct`
+produces a minimal, concrete value; `init` runs immediately after and is
+where that value's own dependencies get resolved, via further `Get`
+calls. **This two-step split is what makes a real dependency cycle
+resolvable without deadlocking**: the value is marked ready the instant
+`construct` returns, strictly before `init` starts recursing — so if
+resolving one type's dependencies loops back around to that same type
+(a genuine cycle among services, not a bug), the recursive `Get` call
+finds the value already there and returns it immediately instead of
+re-entering construction and deadlocking on itself.
+
+**Every registered type needs a `construct` that can hand back something
+concrete before any of its own dependencies resolve.** Most types get
+this for free — a repository, most `core/` Managers, and every
+`clients/<name>` adapter naturally have a trivial, dependency-free
+`construct`. A `core/<domain>/impl.Manager` built by a single eager,
+all-args-required constructor does not, if that domain is a genuine
+participant in a cross-service cycle (e.g. three services that each
+depend on the next one's client, forming a loop). For that case, split
+construction into two exported functions instead of one:
+
+```go
+func NewEmptyManager() *Manager { return &Manager{} }   // construct: instant, unwired
+func Wire(m *Manager, repo Repository, dep OtherServiceClient, ...) { // init: fills the shell
+    m.repo, m.dep = repo, dep
+}
+func NewManager(repo Repository, dep OtherServiceClient, ...) creature.Manager { // production convenience
+    m := NewEmptyManager()
+    Wire(m, repo, dep, ...)
+    return m
+}
+```
+
+`module/module.go` registers `NewEmptyManager` as `construct` and a
+closure calling `Wire` (resolving every dependency via `Get`) as `init`.
+`Wire` takes the concrete `*Manager`, never the interface — a caller
+holding the wrong concrete type is a compile error, not a runtime panic
+on a failed type assertion. Calling any method on a `Manager` before
+`Wire` has run panics on a nil dependency, the same failure mode as
+forgetting to wire any other dependency — not something this type needs
+to guard against itself. **Reach for this split only when a real cycle
+demands it** — a plain, single-step `construct` (or calling `NewManager`
+directly) is the default for every type that isn't a cycle participant.
+
+**The `register` package convention** solves a different problem: a
+type's `Register` call has to actually run (via that package's `init()`)
+before anything calls `Get` for it, and a hand-curated, partial list of
+blank imports is silently incomplete rather than a compile error — worse,
+a cyclic cluster of services needs *every* member's registration
+reachable, or resolving even one of them panics with "not registered."
+Each service gets its own `services/<name>/register/register.go` — a
+package with no exported symbols, whose only content is blank-importing
+that service's own `repository/module`, every `core/<domain>/module`,
+and `actions/module` packages for their `init()` side effects.
+`clients/register/register.go` does the same for every
+`clients/<name>/module` package. A single top-level `register/register.go`
+blank-imports both of those, forming the one complete closure of the
+whole registry — `main.go` and every test blank-import this one
+top-level package (`_ "<module>/register"`) instead of curating their
+own subset.
+
+---
+
 ## interface.go / impl/ / module/ Split
 
 Every `core/` package (nested under `services/<name>/core/<domain>/`,
@@ -425,25 +533,20 @@ follows the same three-way split:
   for its error sentinels and interface type.
 - **`module/`** — its own subpackage (avoids the import cycle `impl`
   importing its parent would otherwise create with a DI constructor).
-  Every backing store this package could have gets its own memoized
-  (`sync.Once`) constructor here — for a `repository/`, that means
-  `NewXXXRepositoryForTesting()` (in-memory) alongside
-  `NewFirestoreXXXRepository()` (or whatever the real store is); for a
-  `core/<domain>/`, `NewManagerForTesting()` alongside
-  `NewFirestoreManager()`. In-memory storage is never a production
-  behavior, so it's always the `ForTesting` one, never the bare name —
-  that's not a naming nicety, it's what makes it true at a glance which
-  constructor is safe to call from where. Every constructor here is a
-  lazy singleton, testing ones included (see **Testing** below for why,
-  and for `Reset()`, the other required export).
-- Tests live next to `interface.go`, use real in-memory implementations
-  via `module.NewXXXForTesting()` for **this service's own**
-  dependencies — never mocks for those, and never construct the
-  interface's implementation any other way (no local
-  `impl.NewManager(...)` call, no hand-rolled fake structs in a
-  `_test.go` file — see **Testing** for what replaces both). A
-  dependency on *another service* is the one place
-  mocking is the right call — see **Testing**.
+  Its `init()` registers the interface type into `framework/inject`'s
+  registry (production) and `framework/inject/testing`'s registry
+  (tests) — see **framework/inject** above. Production registers a real
+  backing store (e.g. Firestore); testing registers an in-memory one.
+  In-memory storage is never a production behavior — that's what the
+  production/testing split enforces, not a naming nicety layered on top
+  of one shared constructor.
+- Tests live next to `interface.go`, resolve **this service's own**
+  dependencies via `injecttesting.Get[X](t.Name())` — never mocks for
+  those, and never construct the interface's implementation any other
+  way (no local `impl.NewManager(...)` call, no hand-rolled fake structs
+  in a `_test.go` file — see **Testing** for what replaces both). A
+  dependency on *another service* resolves the same way, through that
+  dependency's own `clients/<name>/module` — see **Testing**.
 
 ---
 
@@ -621,30 +724,34 @@ composition service only for assembled reads.
 ## Testing
 
 - **A service's own dependencies** (its own `repository/`, its own
-  `core/`) are tested for real, through `module.NewXXXForTesting()` —
-  no mocks. Always construct through `module/`, never any other way —
-  see below for what that rules out.
-- **Another service's dependency** is the one place mocking the
-  generated Connect client is the right call, not a compromise: it's a
-  stable, deliberately-versioned wire contract that changes rarely and
-  on purpose, unlike an internal interface that might shift daily — the
-  usual reason to avoid mocks doesn't apply here. **Hold the generated
-  `critterv1connect.XServiceClient` interface directly as the
+  `core/<domain>/`) are tested for real, through
+  `injecttesting.Get[X](seed)` — no mocks, no hand-rolled fakes. Always
+  resolve through the registry, never any other way — see below for
+  what that rules out.
+- **Another service's dependency** is tested against a real,
+  in-memory-backed instance of that service too, not a mock: it's not a
+  compromise, it's the point — see **framework/inject** above for the
+  mechanism (an `inproc.Adapter` wired to the real `*actions.Server`
+  that owning service registers for the same seed). **Hold the
+  generated `critterv1connect.XServiceClient` interface directly as the
   dependency's type — never a hand-written interface wrapping it.**
   That generated interface already is the correct, minimal abstraction
   boundary; a hand-rolled one on top of it (`PaymentProcessor`,
   `CreatureReader`, whatever) is a redundant layer this codebase used
-  to have and removed. The mock is
-  `clients/<dependency-name>/fake.FakeXServiceClient`, implementing
-  that same generated interface directly (via the generated
-  `UnimplementedXServiceHandler` embedded for the methods this
-  particular consumer never calls), returned (as a lazy singleton) by
-  `clients/<dependency-name>/module.NewForTesting()` — never redefined
-  per test file. Before this pattern existed, two services
-  (`geneticslab` and `nest`, both calling BankService) each carried
-  their own byte-for-byte identical hand-rolled fake *and* hand-rolled
-  interface; `clients/` is what a second consumer of the same
-  dependency should reach for instead of writing that duplicate.
+  to have and removed. This means a test exercises real business logic
+  on both sides of a cross-service call, not a stand-in for either side
+  — the adapter exists purely to satisfy the Go compiler on a genuine
+  import cycle, never to change behavior.
+- **The one exception is a dependency that isn't a Connect service at
+  all** — a clock, a random-ID generator. Those skip
+  `framework/inject`'s registry entirely and keep a small, hand-written
+  fake with a mutable field a test can flip mid-run (see `clients/clock`
+  for the concrete pattern: `FakeClient.Now()` reads a mutable `Time`
+  field live, so setting it after construction is picked up by the code
+  under test's very next call, no rebuild required). The registry-based
+  pattern above is specifically for dependencies that are themselves
+  real, testable services with their own business logic — faking still
+  makes sense for a primitive with no logic of its own to exercise.
 - **A private helper method wrapping one RPC call is fine and expected
   — a shared type is not.** `core/<domain>/impl/manager.go` commonly
   has small unexported methods (`hold`, `confirm`, `getCreature`, ...)
@@ -657,46 +764,27 @@ composition service only for assembled reads.
   sharing an *implementation* across services, not writing a helper
   function at all.
 
-**Every constructor in `module/` — testing and production alike — is a
-lazy singleton, `NewXXXForTesting()` included.** This is a deliberate,
-accepted tradeoff, not an oversight: it means two tests in the same
-package share one instance unless something resets it between them,
-which is exactly what `Reset()` is for.
+**Every test seed is independent by construction, not by convention.**
+`framework/inject/testing`'s registry keys every value by seed (`t.Name()`
+is the normal seed), so two tests never observe each other's value and
+there's nothing to reset between them — no `Reset()` call, no
+`t.Cleanup`, and, unlike a shared hand-memoized singleton, genuinely
+safe to run under `t.Parallel()` without extra care.
 
-- Every `module/` package (`repository/module`, `core/<domain>/module`,
-  and every `clients/<name>/module`) exports a `Reset()` that clears
-  its own memoized instance(s) *and* calls `Reset()` on every module
-  package it directly depends on — the same edges as its own imports,
-  no more, no less. A `core/<domain>/module.Reset()` that wires a
-  repository, a client, and a randomid generator calls all three
-  `Reset()`s; it doesn't need to know or care that the client's own
-  `Reset()` further cascades into whatever *it* depends on.
-- A test that constructs directly from a `module/` package — calling
-  `NewManagerForTesting()`, or reaching into
-  `clients/X/module.NewForTesting()` for per-test configuration —
-  registers `t.Cleanup(module.Reset)`
-  right there. The cascade handles everything transitively used; the
-  test only needs to name the module(s) it touched directly.
-- This means a test never needs a second instance to simulate a
-  dependency changing mid-test (a later call failing after an earlier
-  one succeeded, a clock advancing) — mutate the same `FakeClient` (or
-  `FakeXXXManager`) the code under test is already holding. A
-  dependency invoked more than once over an object's lifetime (e.g. a
-  clock a `Manager` re-reads on every call, not a one-shot
-  `time.Now()` used to compute a value the caller stores and compares
-  itself) is exactly the case this serves — see `clients/clock` for the
-  concrete pattern: `FakeClient.Now()` reads a mutable `Time` field
-  live, so flipping it after construction is picked up by the code
-  under test's very next call, no rebuild required.
-- **Nothing in a test constructs `impl.NewXXX(...)` directly, and no
-  test file defines its own fake/stub type.** Both are exactly what
-  `module/` (for a service's own dependencies) and `clients/` (for
-  another service's) exist to centralize — a fake redefined per test
-  file is the thing this whole convention removes.
-- Known limitation, accepted for now: a `t.Parallel()` test sharing one
-  of these singletons races against another test's `Reset()`. Don't
-  add `t.Parallel()` to a test that goes through `module/`-constructed
-  dependencies without solving this first.
+- Nothing in a test constructs `impl.NewXXX(...)` directly, and no test
+  file defines its own fake/stub type for a dependency the registry
+  already covers. Both are exactly what `framework/inject/testing` (for
+  a service's own dependencies) and `clients/<name>` (for another
+  service's) exist to centralize — a fake redefined per test file is the
+  thing this whole convention removes.
+- Any code reachable from a test — its own service's layers, and every
+  dependency's — needs its `Register` call reachable too, or resolving
+  it panics with "not registered." Blank-import the top-level `register`
+  package (`_ "<module>/register"`) in every test file that calls
+  `injecttesting.Get`, rather than curating a partial list of individual
+  `module` imports — see **framework/inject** above for why a partial
+  list is silently incomplete rather than a compile error, specifically
+  for any cluster of services that depend on each other in a cycle.
 
 ---
 
