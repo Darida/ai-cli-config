@@ -4,12 +4,17 @@
 # everything else itself, via git, with no assumption about how deep this
 # repo is checked out or what it's nested inside:
 #
-#   - Workspace root: ask git. `rev-parse --show-toplevel` finds this
-#     script's own repo root regardless of how deep inside it the script
-#     lives; `rev-parse --show-superproject-working-tree` from there finds
-#     the outer repo that has it checked out as a submodule, if any - that
-#     outer repo is "the workspace". If there isn't one (this repo isn't
-#     anyone's submodule), the workspace is just this repo itself.
+#   - Workspace root: ask git. This script is usually invoked through a
+#     symlink from the calling repo (e.g. some-repo/git/push-all ->
+#     ai-cli-config/git/push-all), so `BASH_SOURCE[0]` is used unresolved
+#     - `dirname` on it, without following the symlink to its target,
+#     lands in the calling repo, and `rev-parse --show-toplevel` from
+#     there finds that repo's root regardless of how deep inside it the
+#     symlink lives. `rev-parse --show-superproject-working-tree` from
+#     there finds the outer repo that has it checked out as a submodule,
+#     if any - that outer repo is "the workspace". If there isn't one
+#     (the calling repo isn't anyone's submodule), the workspace is just
+#     the calling repo itself.
 #   - Which repos to commit, and in what order: the workspace's own
 #     .gitmodules, read in file order (falls back to scanning direct
 #     child directories for a .git entry if there's no .gitmodules).
@@ -35,10 +40,10 @@ main() {
     fi
     MESSAGE="$1"
 
-    SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-    CONFIG_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-    WORKSPACE_ROOT="$(git -C "$CONFIG_REPO_ROOT" rev-parse --show-superproject-working-tree)"
-    WORKSPACE_ROOT="${WORKSPACE_ROOT:-$CONFIG_REPO_ROOT}"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    INVOKING_REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+    WORKSPACE_ROOT="$(git -C "$INVOKING_REPO_ROOT" rev-parse --show-superproject-working-tree)"
+    WORKSPACE_ROOT="${WORKSPACE_ROOT:-$INVOKING_REPO_ROOT}"
 
     COMMIT_MSG="$MESSAGE"
 

@@ -4,13 +4,20 @@
 # This script:
 # 1. Creates an empty AGENTS.md (fill in project-specific rules by hand)
 # 2. Creates CLAUDE.md as a symbolic link to AGENTS.md
-# 3. Copies the pre-push hook from ai-cli-config's own git/hooks/pre-push
-# 4. Commits all files to git
+# 3. Creates git/hooks/pre-push as a real file (not a symlink, so the new
+#    repo can append its own additional hook steps below), which just
+#    calls ai-cli-config's own git/hooks/pre-push by absolute path - so
+#    its lib/ helpers are found there and never need to be copied
+# 4. Symlinks git/push-all to ai-cli-config's git/push-all (not a hook, so
+#    it lives outside git/hooks/ and can stay a plain symlink - push-all
+#    resolves its own real location itself)
+# 5. Commits all files to git
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRE_PUSH_HOOK="$SCRIPT_DIR/../git/hooks/pre-push"
+PUSH_ALL="$SCRIPT_DIR/../git/push-all"
 
 # Verify we're in a git repository
 if [ ! -d .git ]; then
@@ -59,6 +66,11 @@ if [ ! -f "$PRE_PUSH_HOOK" ]; then
     exit 1
 fi
 
+if [ ! -f "$PUSH_ALL" ]; then
+    echo "❌ Error: push-all not found at $PUSH_ALL"
+    exit 1
+fi
+
 echo "📋 Initializing AI agent configuration..."
 
 # 1. Create empty AGENTS.md
@@ -71,30 +83,43 @@ echo "🔗 Creating CLAUDE.md symlink..."
 ln -sf AGENTS.md CLAUDE.md
 echo "✓ CLAUDE.md symlink created"
 
-# 3. Copy pre-push hook
-echo "🪝 Copying pre-push hook..."
+# 3. Create pre-push hook as a wrapper calling ai-cli-config's base hook
+echo "🪝 Creating pre-push hook..."
 mkdir -p git/hooks
-cp "$PRE_PUSH_HOOK" git/hooks/pre-push
-chmod +x git/hooks/pre-push
-echo "✓ Pre-push hook copied"
+cat > git/hooks/pre-push <<HOOK_EOF
+#!/bin/bash
+set -e
 
-# 4. Configure git to use hooks directory
+# Base hook, shared across projects - maintained in ai-cli-config.
+# Add project-specific pre-push steps below this line.
+"$PRE_PUSH_HOOK" "\$@"
+HOOK_EOF
+chmod +x git/hooks/pre-push
+echo "✓ Pre-push hook created"
+
+# 4. Symlink push-all (not a hook - lives at git/push-all, not git/hooks/)
+echo "🔗 Creating git/push-all symlink..."
+ln -sf "$PUSH_ALL" git/push-all
+echo "✓ git/push-all symlink created"
+
+# 5. Configure git to use hooks directory
 echo "⚙️  Configuring git..."
 git config core.hooksPath git/hooks
 echo "✓ Git configured"
 
-# 5. Commit all files
+# 6. Commit all files
 echo "📝 Committing files..."
-git add AGENTS.md CLAUDE.md git/hooks/pre-push
+git add AGENTS.md CLAUDE.md git/hooks/pre-push git/push-all
 git commit -m "docs: add AI agent configuration
 
 - Add empty AGENTS.md for project-specific rules and guidelines
 - Add CLAUDE.md symlink to AGENTS.md
-- Add pre-push hook for automated testing
+- Add pre-push hook wrapper calling ai-cli-config's base hook
+- Add git/push-all symlink for cross-repo commit/push
 
 Fill in AGENTS.md with project-specific details." || echo "  (no changes to commit)"
 
-# 6. Push to remote
+# 7. Push to remote
 echo "🚀 Pushing to remote..."
 echo "  - Temporarily disabling pre-push hook..."
 git config core.hooksPath ""
@@ -102,10 +127,10 @@ git push origin $(git rev-parse --abbrev-ref HEAD)
 echo "  - Re-enabling pre-push hook..."
 git config core.hooksPath git/hooks
 
-# 7. Execute start-ai-work.sh to finalize ai-work branch setup
+# 8. Execute start-ai-work.sh to finalize ai-work branch setup
 bash "$(dirname "$0")/start-ai-work.sh"
 
-# 8. Validate files exist in remote repository
+# 9. Validate files exist in remote repository
 echo ""
 echo "✅ Validating files in remote repository..."
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -113,7 +138,8 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if git ls-remote --heads origin "$CURRENT_BRANCH" | grep -q "$CURRENT_BRANCH"; then
     if git show origin/$CURRENT_BRANCH:AGENTS.md >/dev/null 2>&1 && \
        git show origin/$CURRENT_BRANCH:CLAUDE.md >/dev/null 2>&1 && \
-       git show origin/$CURRENT_BRANCH:git/hooks/pre-push >/dev/null 2>&1; then
+       git show origin/$CURRENT_BRANCH:git/hooks/pre-push >/dev/null 2>&1 && \
+       git show origin/$CURRENT_BRANCH:git/push-all >/dev/null 2>&1; then
         echo "✓ All files verified in remote repository"
     else
         echo "❌ ERROR: Some files missing from remote repository"
