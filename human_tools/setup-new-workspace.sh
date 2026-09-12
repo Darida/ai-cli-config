@@ -4,9 +4,10 @@
 # This script:
 # 1. Creates an empty AGENTS.md (fill in project-specific rules by hand)
 # 2. Creates CLAUDE.md as a symbolic link to AGENTS.md
-# 3. Copies the pre-push hook (+ its lib/ helpers) from ai-cli-config's own
-#    git/hooks/, as a real file (not a symlink) so the new repo can append
-#    its own additional hook steps on top of this base later
+# 3. Creates git/hooks/pre-push as a real file (not a symlink, so the new
+#    repo can append its own additional hook steps below), which just
+#    calls ai-cli-config's own git/hooks/pre-push by absolute path - so
+#    its lib/ helpers are found there and never need to be copied
 # 4. Symlinks git/push-all to ai-cli-config's git/push-all (not a hook, so
 #    it lives outside git/hooks/ and can stay a plain symlink - push-all
 #    resolves its own real location itself)
@@ -16,7 +17,6 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PRE_PUSH_HOOK="$SCRIPT_DIR/../git/hooks/pre-push"
-HOOKS_LIB="$SCRIPT_DIR/../git/hooks/lib"
 PUSH_ALL="$SCRIPT_DIR/../git/push-all"
 
 # Verify we're in a git repository
@@ -66,11 +66,6 @@ if [ ! -f "$PRE_PUSH_HOOK" ]; then
     exit 1
 fi
 
-if [ ! -d "$HOOKS_LIB" ]; then
-    echo "❌ Error: Hooks lib not found at $HOOKS_LIB"
-    exit 1
-fi
-
 if [ ! -f "$PUSH_ALL" ]; then
     echo "❌ Error: push-all not found at $PUSH_ALL"
     exit 1
@@ -88,14 +83,19 @@ echo "🔗 Creating CLAUDE.md symlink..."
 ln -sf AGENTS.md CLAUDE.md
 echo "✓ CLAUDE.md symlink created"
 
-# 3. Copy pre-push hook and its lib/ helpers
-echo "🪝 Copying pre-push hook..."
+# 3. Create pre-push hook as a wrapper calling ai-cli-config's base hook
+echo "🪝 Creating pre-push hook..."
 mkdir -p git/hooks
-cp "$PRE_PUSH_HOOK" git/hooks/pre-push
+cat > git/hooks/pre-push <<HOOK_EOF
+#!/bin/bash
+set -e
+
+# Base hook, shared across projects - maintained in ai-cli-config.
+# Add project-specific pre-push steps below this line.
+"$PRE_PUSH_HOOK" "\$@"
+HOOK_EOF
 chmod +x git/hooks/pre-push
-cp -r "$HOOKS_LIB" git/hooks/lib
-chmod +x git/hooks/lib/*
-echo "✓ Pre-push hook copied"
+echo "✓ Pre-push hook created"
 
 # 4. Symlink push-all (not a hook - lives at git/push-all, not git/hooks/)
 echo "🔗 Creating git/push-all symlink..."
@@ -109,12 +109,12 @@ echo "✓ Git configured"
 
 # 6. Commit all files
 echo "📝 Committing files..."
-git add AGENTS.md CLAUDE.md git/hooks/pre-push git/hooks/lib git/push-all
+git add AGENTS.md CLAUDE.md git/hooks/pre-push git/push-all
 git commit -m "docs: add AI agent configuration
 
 - Add empty AGENTS.md for project-specific rules and guidelines
 - Add CLAUDE.md symlink to AGENTS.md
-- Add pre-push hook (+ lib helpers) for automated testing
+- Add pre-push hook wrapper calling ai-cli-config's base hook
 - Add git/push-all symlink for cross-repo commit/push
 
 Fill in AGENTS.md with project-specific details." || echo "  (no changes to commit)"
