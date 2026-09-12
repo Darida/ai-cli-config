@@ -6,7 +6,11 @@
 # Submodules are discovered from .gitmodules, never hardcoded, so this
 # doesn't need updating when a submodule is added or removed. Repos with
 # no diff between ai-work and main are skipped entirely (no link shown,
-# nothing run for them) — nothing to approve there.
+# nothing run for them) — nothing to approve there. Fails fast, before
+# touching anything, if any repo has uncommitted changes (staged,
+# unstaged, or untracked) — this script only ever reasons about what's
+# on origin/ai-work, so a dirty working tree means that comparison
+# can't be trusted to reflect what you actually meant to review.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +37,30 @@ has_pending_changes() {
 }
 
 mapfile -t SUBMODULE_PATHS < <(git config --file "$WORKSPACE_ROOT/.gitmodules" --get-regexp '\.path$' | awk '{print $2}')
+
+is_dirty() {
+    local repo_path="$1"
+    [ -n "$(git -C "$repo_path" status --porcelain)" ]
+}
+
+DIRTY_REPOS=()
+for path in "${SUBMODULE_PATHS[@]}"; do
+    if is_dirty "$WORKSPACE_ROOT/$path"; then
+        DIRTY_REPOS+=("$path")
+    fi
+done
+if is_dirty "$WORKSPACE_ROOT"; then
+    DIRTY_REPOS+=("workspace root")
+fi
+
+if [ "${#DIRTY_REPOS[@]}" -gt 0 ]; then
+    echo "❌ Uncommitted changes present, refusing to proceed:" >&2
+    for repo in "${DIRTY_REPOS[@]}"; do
+        echo "  - $repo" >&2
+    done
+    echo "   Commit and push (e.g. via git/push-all) before approving." >&2
+    exit 1
+fi
 
 SUBMODULES_TO_APPROVE=()
 echo "=== ai-work -> main review links ==="
