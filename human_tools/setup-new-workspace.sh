@@ -1,15 +1,16 @@
 #!/bin/bash
-# Initialize AI agent configuration from templates
+# Initialize AI agent configuration for a new workspace repo
 # Run from your project root directory
 # This script:
-# 1. Copies AGENTS.md template from ~/templates/agents/AGENTS.md
+# 1. Creates an empty AGENTS.md (fill in project-specific rules by hand)
 # 2. Creates CLAUDE.md as a symbolic link to AGENTS.md
-# 3. Copies pre-push hook from ~/templates/git/hooks/pre-push
+# 3. Copies the pre-push hook from ai-cli-config's own git/hooks/pre-push
 # 4. Commits all files to git
 
 set -e
 
-TEMPLATES_DIR=~/templates
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PRE_PUSH_HOOK="$SCRIPT_DIR/../git/hooks/pre-push"
 
 # Verify we're in a git repository
 if [ ! -d .git ]; then
@@ -52,23 +53,18 @@ if [ -n "$OTHER_BRANCHES" ]; then
     done
 fi
 
-# Verify template files exist
-if [ ! -f "$TEMPLATES_DIR/agents/AGENTS.md" ]; then
-    echo "❌ Error: Template not found at $TEMPLATES_DIR/agents/AGENTS.md"
-    exit 1
-fi
-
-if [ ! -f "$TEMPLATES_DIR/git/hooks/pre-push" ]; then
-    echo "❌ Error: Hook template not found at $TEMPLATES_DIR/git/hooks/pre-push"
+# Verify the pre-push hook source exists
+if [ ! -f "$PRE_PUSH_HOOK" ]; then
+    echo "❌ Error: Hook not found at $PRE_PUSH_HOOK"
     exit 1
 fi
 
 echo "📋 Initializing AI agent configuration..."
 
-# 1. Copy AGENTS.md template
-echo "📄 Copying AGENTS.md template..."
-cp "$TEMPLATES_DIR/agents/AGENTS.md" AGENTS.md
-echo "✓ AGENTS.md copied"
+# 1. Create empty AGENTS.md
+echo "📄 Creating empty AGENTS.md..."
+touch AGENTS.md
+echo "✓ AGENTS.md created"
 
 # 2. Create CLAUDE.md as symbolic link to AGENTS.md
 echo "🔗 Creating CLAUDE.md symlink..."
@@ -78,7 +74,7 @@ echo "✓ CLAUDE.md symlink created"
 # 3. Copy pre-push hook
 echo "🪝 Copying pre-push hook..."
 mkdir -p git/hooks
-cp "$TEMPLATES_DIR/git/hooks/pre-push" git/hooks/pre-push
+cp "$PRE_PUSH_HOOK" git/hooks/pre-push
 chmod +x git/hooks/pre-push
 echo "✓ Pre-push hook copied"
 
@@ -92,11 +88,11 @@ echo "📝 Committing files..."
 git add AGENTS.md CLAUDE.md git/hooks/pre-push
 git commit -m "docs: add AI agent configuration
 
-- Add AGENTS.md with AI agent rules and guidelines
+- Add empty AGENTS.md for project-specific rules and guidelines
 - Add CLAUDE.md symlink to AGENTS.md
 - Add pre-push hook for automated testing
 
-Customize AGENTS.md with project-specific details." || echo "  (no changes to commit)"
+Fill in AGENTS.md with project-specific details." || echo "  (no changes to commit)"
 
 # 6. Push to remote
 echo "🚀 Pushing to remote..."
@@ -132,8 +128,7 @@ echo ""
 echo "✅ AI agent configuration initialized!"
 echo ""
 echo "📝 Next steps:"
-echo "  1. Edit AGENTS.md to customize for your project"
-echo "  2. Replace all TODO markers with project-specific values"
-echo "  3. Adapt git/hooks/pre-push test command if needed"
-echo "  4. Changes have been committed and pushed"
+echo "  1. Fill in AGENTS.md with project-specific rules and guidelines"
+echo "  2. Adapt git/hooks/pre-push test command if needed"
+echo "  3. Changes have been committed and pushed"
 echo ""
