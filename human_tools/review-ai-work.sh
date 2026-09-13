@@ -232,7 +232,7 @@ extract_git_diff() {
   done
 
   local diff_content=""
-  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
+  diff_content=$(git --no-pager diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
 
   if [ -n "$diff_content" ]; then
     diff_content=$(node -e '
@@ -262,19 +262,19 @@ extract_git_diff() {
   fi
 
   local deleted_files
-  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
+  deleted_files=$(git --no-pager diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
   if [ -n "$deleted_files" ]; then
     diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
 
   local changed_images
-  changed_images=$(git diff --name-only origin/main...HEAD -- "${image_excludes[@]}" 2>/dev/null || echo "")
+  changed_images=$(git --no-pager diff --name-only origin/main...HEAD -- "${image_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_images" ]; then
     diff_content="${diff_content}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${changed_images}"
   fi
 
   local changed_md
-  changed_md=$(git diff --name-only origin/main...HEAD -- "${md_excludes[@]}" 2>/dev/null || echo "")
+  changed_md=$(git --no-pager diff --name-only origin/main...HEAD -- "${md_excludes[@]}" 2>/dev/null || echo "")
   if [ -n "$changed_md" ]; then
     diff_content="${diff_content}"$'\n\n'"Markdown files changed (contents omitted, filenames only):"$'\n'"${changed_md}"
   fi
