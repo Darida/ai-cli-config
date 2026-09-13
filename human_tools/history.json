@@ -3,384 +3,448 @@
     "timestamp": "2026-08-03T06:52:14.027Z",
     "model": "google/gemini-2.5-flash-lite",
     "status": "success",
-    "notes_count": 17
+    "notes_count": 17,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T06:53:49.201Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T06:53:53.153Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:21:44.044Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:44:41.031Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 3
+    "notes_count": 3,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:45:27.448Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:45:40.755Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:59:26.767Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T15:59:33.436Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T16:37:05.682Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T16:37:56.161Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T16:51:31.770Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:19:26.847Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 4
+    "notes_count": 4,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:34:21.808Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 9
+    "notes_count": 9,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:34:28.704Z",
     "model": "openai/gpt-oss-20b:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:34:41.842Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:50:50.107Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:56:14.155Z",
     "model": "nvidia/nemotron-nano-9b-v2:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T17:56:16.903Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:08:33.154Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:08:45.162Z",
     "model": "openai/gpt-oss-20b:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:09:06.898Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:29:31.805Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:31:44.398Z",
     "model": "openai/gpt-oss-20b:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T18:31:56.376Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-08-03T19:14:42.738Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-12T23:33:34.371Z",
     "model": "dots-studio/dots-3-note-preview:free",
     "status": "success",
-    "notes_count": 3
+    "notes_count": 3,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-12T23:48:08.867Z",
     "model": "cohere/north-mini-code:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-12T23:49:19.843Z",
     "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "status": "success",
-    "notes_count": 6
+    "notes_count": 6,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:04:52.484Z",
     "model": "cohere/north-mini-code:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:05:10.638Z",
     "model": "poolside/laguna-s-2.1:free",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:09:11.849Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:32:00.463Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:34:45.636Z",
     "model": "nex-agi/nex-n2.5-mini:free",
     "status": "success",
-    "notes_count": 1
+    "notes_count": 1,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T00:56:27.443Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 5
+    "notes_count": 5,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T01:02:39.072Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T01:25:34.218Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 4
+    "notes_count": 4,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T01:37:49.909Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T01:45:23.687Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T01:52:47.289Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T02:29:17.981Z",
     "model": "liquid/lfm-2.5-2.6b:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T02:44:06.728Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T02:46:20.182Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T02:56:14.683Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T03:00:15.891Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T03:02:43.395Z",
     "model": "dots-studio/dots-3-note-preview:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T04:43:51.093Z",
     "model": "liquid/lfm-2.5-2.6b:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T05:18:36.006Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T05:20:46.798Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T05:56:36.560Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 1
+    "notes_count": 1,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T06:03:55.306Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 1
+    "notes_count": 1,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T06:58:30.212Z",
     "model": "liquid/lfm-2.5-2.6b:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T07:27:15.532Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 3
+    "notes_count": 3,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T07:45:24.453Z",
     "model": "nex-agi/nex-n2.5-mini:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T08:04:05.067Z",
     "model": "dots-studio/dots-3-note-preview:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T08:20:06.742Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T08:20:17.296Z",
     "model": "nex-agi/nex-n2.5-pro:free",
     "status": "success",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T18:24:24.934Z",
     "model": "nex-agi/nex-n2.5-mini:free",
     "status": "success",
-    "notes_count": 1
+    "notes_count": 1,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T18:47:22.693Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 3
+    "notes_count": 3,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T19:03:01.841Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
-    "notes_count": 2
+    "notes_count": 2,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T19:37:53.645Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T19:41:54.903Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T19:45:56.166Z",
     "model": "",
     "status": "fail",
-    "notes_count": 0
+    "notes_count": 0,
+    "latency": 0
   },
   {
     "timestamp": "2026-09-13T20:31:01.426Z",
     "model": "z-ai/glm-5.3-flash",
     "status": "success",
-    "notes_count": 4
+    "notes_count": 4,
+    "latency": 0
   }
 ]
