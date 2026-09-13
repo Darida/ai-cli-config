@@ -141,18 +141,27 @@ main() {
 
   build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" "$EXCLUDED_MODELS" > "$PAYLOAD_TMPFILE"
 
-  # Hedged-parallel attempts: never abort a request. Attempt 1 fires immediately;
-  # attempt N+1 fires as soon as attempt N is either known-failed or has been
-  # pending STAGGER_SECONDS with no response — whichever comes first. Once any
-  # attempt succeeds, no further attempt is launched, but ones already in flight
-  # are left to finish (never killed) so their latency/outcome can still be
-  # logged. All printing/history-writing happens only in the single main loop
-  # (never inside a backgrounded attempt), so concurrent outputs never interleave.
+  # Hedged-parallel attempts. Attempt 1 fires immediately; attempt N+1 fires as
+  # soon as attempt N is either known-failed or has been pending STAGGER_SECONDS
+  # with no response — whichever comes first. Once any attempt succeeds, no
+  # further attempt is launched, and any still in flight get ABORT_GRACE_SECONDS
+  # to finish on their own (they're still printed if they succeed in that
+  # window) before being killed. A killed attempt is always recorded as a
+  # failure — even if OpenRouter shows it completing successfully afterward,
+  # it never delivered a usable result to this run — but its generation ID
+  # (captured from response headers within seconds, long before slow
+  # generations finish) lets us recover the real model via /generation?id=...
+  # so exclusion tracking still learns the truth instead of losing the data.
+  # All printing/history-writing happens only in the single main loop (never
+  # inside a backgrounded attempt), so concurrent outputs never interleave.
   MAX_ATTEMPTS=3
   STAGGER_SECONDS=60
+  ABORT_GRACE_SECONDS=30
   RUN_TAG="$$"
   declare -A LAUNCHED=() PROCESSED=() LAUNCH_TS=()
   ANY_SUCCESS=false
+  SUCCESS_TS=""
+  STRAGGLERS_ABORTED=false
   OVERALL_STATUS=""
   FAILED_ATTEMPT_FILES=()
 
@@ -170,6 +179,7 @@ main() {
     maybe_launch_next_attempt 1 2 "$NOW"
     maybe_launch_next_attempt 2 3 "$NOW"
     poll_completed_attempts
+    maybe_abort_stragglers "$NOW"
 
     all_launched_attempts_processed && break
 
@@ -347,25 +357,118 @@ all_launched_attempts_processed() {
   return 0
 }
 
-# Issues the OpenRouter request for one attempt, writing the raw response body
-# to response_tmpfile. Echoes the HTTP status code ("000" if curl never got one).
+# Once a winning attempt exists, give every still-running attempt
+# ABORT_GRACE_SECONDS to finish on its own before giving up on it for good.
+maybe_abort_stragglers() {
+  local now="$1"
+  [ "$ANY_SUCCESS" = true ] || return 0
+  [ "$STRAGGLERS_ABORTED" = false ] || return 0
+  [ $((now - SUCCESS_TS)) -ge "$ABORT_GRACE_SECONDS" ] || return 0
+
+  STRAGGLERS_ABORTED=true
+  local n
+  for n in 1 2 3; do
+    if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
+      abort_and_record_straggler "$n"
+      PROCESSED[$n]=1
+    fi
+  done
+}
+
+# Kills one still-running attempt and records it — always as a failure. A
+# request we gave up on never delivered a usable result to this run, no
+# matter what OpenRouter itself shows for it afterward. Its generation ID
+# (already captured from response headers, which arrive within seconds
+# regardless of how long the generation itself takes) lets us recover the
+# real model via /generation?id=... so exclusion tracking still attributes
+# the failure correctly instead of losing the data the way an abandoned
+# request otherwise would.
+abort_and_record_straggler() {
+  local n="$1"
+  local pid_file="/tmp/review_pid_${RUN_TAG}_${n}"
+  local header_file="/tmp/review_headers_${RUN_TAG}_${n}.txt"
+  local pid gen_id model wait_latency
+
+  wait_latency=$(( $(date +%s) - LAUNCH_TS[$n] ))
+
+  # Read the generation ID before killing anything: run_attempt deletes
+  # header_file/pid_file itself once its curl exits (killed or not), so
+  # reading first — while the attempt is still definitely running — avoids
+  # racing that cleanup. Headers are long since fully written by this point
+  # regardless (they arrive within seconds; we only ever get here 90s+ in).
+  gen_id=$(extract_generation_id "$header_file")
+
+  if [ -f "$pid_file" ]; then
+    pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  sleep 1
+
+  model="unknown"
+  [ -n "$gen_id" ] && model=$(fetch_generation_model "$gen_id")
+
+  record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$wait_latency" "$gen_id"
+  log_error "[Attempt ${n}/${MAX_ATTEMPTS}] Aborted ${ABORT_GRACE_SECONDS}s after a winning response arrived (model: ${model}, generation id: ${gen_id:-unknown}); recorded as a failure since it never delivered a result to this run."
+}
+
+# Issues the OpenRouter request for one attempt in the background so it can be
+# killed by the caller, writing its PID to pid_file immediately (before the
+# response can possibly arrive) so a straggler can be aborted once a winning
+# attempt exists elsewhere. Waits for it here; echoes curl's own exit code
+# (0 = completed normally, nonzero = transport error or killed).
 send_review_request() {
   local response_tmpfile="$1"
-  local http_code
+  local header_tmpfile="$2"
+  local pid_file="$3"
 
-  http_code=$(curl -s -w "%{http_code}" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  curl -s -D "$header_tmpfile" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
     -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
-  http_code=$(echo "$http_code" | tr -d '\r\n[:space:]' | tail -c 3)
-  [ -z "$http_code" ] && http_code="000"
-  echo "$http_code"
+    --data-binary "@$PAYLOAD_TMPFILE" &
+  local curl_pid=$!
+  echo "$curl_pid" > "$pid_file"
+
+  wait "$curl_pid"
+  echo $?
+}
+
+# OpenRouter returns the HTTP status line and an X-Generation-Id header
+# immediately — within seconds, well before a slow generation's body
+# completes (verified directly: an aborted request to a model that took
+# 1000+ seconds still had both in its header dump within the first 8s).
+extract_http_status() {
+  local header_file="$1"
+  local code
+  code=$(grep -m1 -E '^HTTP/' "$header_file" 2>/dev/null | awk '{print $2}')
+  [ -z "$code" ] && code="000"
+  echo "$code"
+}
+
+extract_generation_id() {
+  local header_file="$1"
+  local gen_id
+  gen_id=$(grep -i -m1 '^x-generation-id:' "$header_file" 2>/dev/null | cut -d: -f2- | tr -d '\r' | xargs)
+  echo "$gen_id"
 }
 
 extract_response_model() {
   local response_tmpfile="$1"
   local model
   model=$(jq -r '.model // empty' "$response_tmpfile" 2>/dev/null || echo "")
+  [ -z "$model" ] && model="unknown"
+  echo "$model"
+}
+
+# Recovers the model actually used for a generation we gave up waiting on,
+# via OpenRouter's /generation lookup (the response shape is {data: {model, ...}}).
+fetch_generation_model() {
+  local gen_id="$1"
+  local model
+  model=$(curl -s --connect-timeout 10 --max-time 15 "https://openrouter.ai/api/v1/generation?id=${gen_id}" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" 2>/dev/null | jq -r '.data.model // empty' 2>/dev/null)
   [ -z "$model" ] && model="unknown"
   echo "$model"
 }
@@ -407,25 +510,37 @@ parse_review_verdict() {
 run_attempt() {
   local attempt_num="$1"
   local result_file="/tmp/review_result_${RUN_TAG}_${attempt_num}.json"
+  local header_file="/tmp/review_headers_${RUN_TAG}_${attempt_num}.txt"
+  local pid_file="/tmp/review_pid_${RUN_TAG}_${attempt_num}"
   # Safety net: this runs backgrounded under `set -e` — if anything here fails
   # unexpectedly before the normal result write, guarantee a result file still
   # appears, or the main loop's poll would wait for it forever.
-  trap 'write_fallback_result "$result_file" "$attempt_num"' EXIT
+  trap 'write_fallback_result "$result_file" "$attempt_num"; rm -f "$pid_file"' EXIT
 
-  local response_tmpfile start_ts end_ts latency http_code model
+  local response_tmpfile start_ts end_ts latency curl_exit http_code model gen_id
   local status_val ai_output notes_count failure_reason="" response_ref=""
 
   response_tmpfile=$(mktemp "/tmp/review_attempt_${attempt_num}_XXXXXX.json")
   start_ts=$(date +%s)
-  http_code=$(send_review_request "$response_tmpfile")
+  curl_exit=$(send_review_request "$response_tmpfile" "$header_file" "$pid_file")
   end_ts=$(date +%s)
   latency=$((end_ts - start_ts))
+
+  http_code=$(extract_http_status "$header_file")
+  gen_id=$(extract_generation_id "$header_file")
   model=$(extract_response_model "$response_tmpfile")
 
-  parse_review_verdict "$http_code" "$response_tmpfile"
+  if [ "$curl_exit" = "0" ]; then
+    parse_review_verdict "$http_code" "$response_tmpfile"
+  else
+    status_val=""
+    ai_output=""
+    notes_count=0
+  fi
 
   if [ -z "$status_val" ]; then
     failure_reason=$(classify_response_failure "$response_tmpfile")
+    [ "$curl_exit" != "0" ] && failure_reason="aborted or transport error (curl exit ${curl_exit})"
     response_ref="$response_tmpfile"
   else
     rm -f "$response_tmpfile"
@@ -441,9 +556,11 @@ run_attempt() {
     --argjson latency "$latency" \
     --arg failure_reason "$failure_reason" \
     --arg response_file "$response_ref" \
-    '{attempt: $attempt, model: $model, http_code: $http_code, status: $status, output: $output, notes_count: $notes_count, latency: $latency, failure_reason: $failure_reason, response_file: $response_file}' \
+    --arg generation_id "$gen_id" \
+    '{attempt: $attempt, model: $model, http_code: $http_code, status: $status, output: $output, notes_count: $notes_count, latency: $latency, failure_reason: $failure_reason, response_file: $response_file, generation_id: $generation_id}' \
     > "${result_file}.partial"
   mv "${result_file}.partial" "$result_file"
+  rm -f "$header_file" "$pid_file"
 }
 
 write_fallback_result() {
@@ -451,14 +568,14 @@ write_fallback_result() {
   local attempt_num="$2"
   [ -f "$result_file" ] && return 0
   jq -n --argjson attempt "$attempt_num" \
-    '{attempt: $attempt, model: "unknown", http_code: "000", status: "", output: "", notes_count: 0, latency: 0, failure_reason: "unexpected script error", response_file: ""}' \
+    '{attempt: $attempt, model: "unknown", http_code: "000", status: "", output: "", notes_count: 0, latency: 0, failure_reason: "unexpected script error", response_file: "", generation_id: ""}' \
     > "${result_file}.partial" 2>/dev/null && mv "${result_file}.partial" "$result_file" 2>/dev/null || true
 }
 
 process_attempt_result() {
   local result_file="$1"
   local attempt_num="$2"
-  local model status_val output notes_count latency http_code failure_reason response_file
+  local model status_val output notes_count latency http_code failure_reason response_file generation_id
 
   model=$(jq -r '.model' "$result_file")
   status_val=$(jq -r '.status' "$result_file")
@@ -468,9 +585,11 @@ process_attempt_result() {
   http_code=$(jq -r '.http_code' "$result_file")
   failure_reason=$(jq -r '.failure_reason' "$result_file")
   response_file=$(jq -r '.response_file' "$result_file")
+  generation_id=$(jq -r '.generation_id // empty' "$result_file")
 
   if [ -n "$status_val" ]; then
-    record_history_entry "$HISTORY_FILE" "$model" "success" "$notes_count" "$latency"
+    record_history_entry "$HISTORY_FILE" "$model" "success" "$notes_count" "$latency" "$generation_id"
+    [ "$ANY_SUCCESS" = false ] && SUCCESS_TS=$(date +%s)
     ANY_SUCCESS=true
     if [ "$status_val" = "ACTION_REQUIRED" ]; then
       OVERALL_STATUS="ACTION_REQUIRED"
@@ -483,7 +602,7 @@ process_attempt_result() {
     echo -e "$output"
     echo -e "${BLUE}======================================================${NC}"
   else
-    record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$latency"
+    record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$latency" "$generation_id"
     FAILED_ATTEMPT_FILES+=("$response_file")
     log_error "[ERROR] Attempt ${attempt_num}/${MAX_ATTEMPTS} failed (HTTP Status: ${http_code}, Model: ${model}, Reason: ${failure_reason}, Latency: ${latency}s). Debug file: file://${response_file}"
   fi
@@ -572,6 +691,7 @@ record_history_entry() {
   local status_val="$3"
   local notes_cnt="$4"
   local latency_val="$5"
+  local generation_id_val="${6:-}"
   local pending_file="/tmp/review_history_pending.json"
 
   node -e '
@@ -582,7 +702,8 @@ record_history_entry() {
     model: process.argv[2],
     status: process.argv[3],
     notes_count: parseInt(process.argv[4], 10) || 0,
-    latency: parseInt(process.argv[5], 10) || 0
+    latency: parseInt(process.argv[5], 10) || 0,
+    generation_id: process.argv[6] || ""
   };
 
   let history = [];
@@ -596,7 +717,7 @@ record_history_entry() {
 
   history.push(entry);
   fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
-  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" "$latency_val" 2>/dev/null || true
+  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" "$latency_val" "$generation_id_val" 2>/dev/null || true
 }
 
 flush_and_commit_history() {
