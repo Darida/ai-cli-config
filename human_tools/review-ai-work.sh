@@ -19,12 +19,16 @@ main() {
   log_info "=== AI Work Code Review ==="
 
   NO_CONFIRM=false
+  NOFLUSH=false
   BASE_REF=""
 
   for arg in "$@"; do
     case "$arg" in
       --noconfirm|--no-confirm|-y)
         NO_CONFIRM=true
+        ;;
+      --noflush)
+        NOFLUSH=true
         ;;
       *)
         if [ -z "$BASE_REF" ]; then
@@ -76,7 +80,7 @@ main() {
   PROMPT_TMPFILE="$(mktemp)"
   PAYLOAD_TMPFILE="$(mktemp)"
   DIFF_TMPFILE="$(mktemp)"
-  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE"' EXIT
+  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE" "$DIFF_TMPFILE"; [ "$NOFLUSH" = true ] || flush_and_commit_history "$SCRIPT_DIR/history.json"' EXIT
 
   printf '%s' "$DIFF_CONTENT" > "$DIFF_TMPFILE"
 
@@ -296,6 +300,7 @@ build_openrouter_payload() {
           schema: ($schema | fromjson)
         }
       },
+      provider: { require_parameters: true },
       reasoning: { exclude: true },
       plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
       messages: [{ role: "user", content: $text }]
@@ -402,6 +407,45 @@ record_history_entry() {
   history.push(entry);
   fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
   ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
+}
+
+flush_and_commit_history() {
+  local history_file="$1"
+  local pending_file="/tmp/review_history_pending.json"
+  local script_dir
+  script_dir="$(cd "$(dirname "$history_file")" && pwd)"
+
+  [ ! -f "$pending_file" ] && return 0
+
+  node -e '
+  const fs = require("fs");
+  const historyFile = process.argv[1];
+  const pendingFile = process.argv[2];
+  let history = [];
+  try {
+    if (fs.existsSync(historyFile)) {
+      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
+    }
+  } catch (e) {}
+
+  try {
+    if (fs.existsSync(pendingFile)) {
+      const pending = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
+      if (Array.isArray(pending) && pending.length > 0) {
+        history = history.concat(pending);
+        fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), "utf8");
+      }
+      fs.unlinkSync(pendingFile);
+    }
+  } catch (e) {}
+  ' "$history_file" "$pending_file" 2>/dev/null || true
+
+  if git -C "$script_dir" status --porcelain "$history_file" 2>/dev/null | grep -q .; then
+    git -C "$script_dir" add "$history_file" 2>/dev/null || true
+    if git -C "$script_dir" commit -m "chore(history): update AI review history log" 2>/dev/null; then
+      git -C "$script_dir" push origin ai-work 2>/dev/null || true
+    fi
+  fi
 }
 
 log_info() {
