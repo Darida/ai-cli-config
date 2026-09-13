@@ -316,10 +316,7 @@ build_openrouter_payload() {
 
 # Reads/writes LAUNCHED/LAUNCH_TS/ANY_SUCCESS — locals of main() further up
 # the call stack — safe since this is always called synchronously (never
-# backgrounded) from within main()'s own loop, so no subshell copy is
-# involved. Note: a successful prev already sets ANY_SUCCESS, so the first
-# check below alone is enough to distinguish "prev succeeded" from "prev
-# failed" without inspecting prev's own status here.
+# backgrounded) from within main()'s own loop, so no subshell copy is involved.
 maybe_launch_next_attempt() {
   local prev_attempt="$1"
   local next_attempt="$2"
@@ -669,14 +666,14 @@ get_excluded_models() {
   const weekStart = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const monthStart = now.getTime() - 30 * 24 * 60 * 60 * 1000;
 
-  const isFailureEntry = (item) =>
-    item.status === "fail" || (typeof item.latency === "number" && item.latency >= 60);
+  const isFailureEntry = (item) => item.status === "fail" || item.latency >= 60;
 
   const failures = {};
 
   for (const item of history) {
-    // !item.model here only ever discards unattributed legacy entries: a
-    // failure recorded today always carries at least "unknown", never "".
+    // A failure recorded today always carries a model, at least "unknown" —
+    // !item.model here excludes only the small set of existing entries from
+    // before model attribution existed, which have no model to exclude by.
     if (!isFailureEntry(item) || !item.model) continue;
     const time = new Date(item.timestamp).getTime();
     if (isNaN(time)) continue;
