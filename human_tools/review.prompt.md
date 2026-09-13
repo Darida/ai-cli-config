@@ -86,6 +86,7 @@ Comments in `.proto` files are public API documentation for external callers who
   - Do NOT describe, narrate, or list what a diff changed, added, removed, or renamed. Every bullet must state a violation and where it is — never a summary of the change that introduced it.
   - If a bullet doesn't name a specific Rule 1-7 violation, it doesn't belong in the output at all, regardless of how accurate its description of the diff is.
 - **Generalize Repeated Issues**: If the exact same issue affects multiple files or locations, generalize the finding into a single note and list a few specific places as representative examples (e.g., `path/to/fileA.ts:L12`, `path/to/fileB.ts:L44`).
+- **File Field**: Each note's `file` field MUST be the repo-relative path of the single file most representative of that violation (no line numbers, no backticks). If a finding spans multiple files, put the primary one in `file` and name the rest in `text`.
 
 ---
 

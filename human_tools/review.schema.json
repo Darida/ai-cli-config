@@ -15,12 +15,16 @@
             "type": "string",
             "description": "Rule name (e.g. Rule 1: Review Comments)"
           },
+          "file": {
+            "type": "string",
+            "description": "Path (relative to repo root) of the file containing the violation. If the finding spans multiple files, use the single most representative file here and mention the others in text."
+          },
           "text": {
             "type": "string",
-            "description": "Actionable finding description and specific file locations"
+            "description": "Actionable finding description"
           }
         },
-        "required": ["rule", "text"],
+        "required": ["rule", "file", "text"],
         "additionalProperties": false
       }
     }
