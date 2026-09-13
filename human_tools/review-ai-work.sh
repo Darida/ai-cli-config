@@ -167,40 +167,11 @@ main() {
   while true; do
     NOW=$(date +%s)
 
-    if [ "$ANY_SUCCESS" = false ] && [ -z "${LAUNCHED[2]:-}" ]; then
-      if [ -n "${PROCESSED[1]:-}" ] || [ $((NOW - LAUNCH_TS[1])) -ge "$STAGGER_SECONDS" ]; then
-        log_info "[Attempt 2/${MAX_ATTEMPTS}] Issuing a concurrent request to OpenRouter (${MODEL_NAME})..."
-        run_attempt 2 &
-        LAUNCHED[2]=1
-        LAUNCH_TS[2]=$NOW
-      fi
-    fi
+    maybe_launch_next_attempt 1 2 "$NOW"
+    maybe_launch_next_attempt 2 3 "$NOW"
+    poll_completed_attempts
 
-    if [ "$ANY_SUCCESS" = false ] && [ -n "${LAUNCHED[2]:-}" ] && [ -z "${LAUNCHED[3]:-}" ]; then
-      if [ -n "${PROCESSED[2]:-}" ] || [ $((NOW - LAUNCH_TS[2])) -ge "$STAGGER_SECONDS" ]; then
-        log_info "[Attempt 3/${MAX_ATTEMPTS}] Issuing a third concurrent request to OpenRouter (${MODEL_NAME})..."
-        run_attempt 3 &
-        LAUNCHED[3]=1
-        LAUNCH_TS[3]=$NOW
-      fi
-    fi
-
-    for n in 1 2 3; do
-      if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
-        RESULT_FILE="/tmp/review_result_${RUN_TAG}_${n}.json"
-        if [ -f "$RESULT_FILE" ]; then
-          process_attempt_result "$RESULT_FILE" "$n"
-          PROCESSED[$n]=1
-          rm -f "$RESULT_FILE"
-        fi
-      fi
-    done
-
-    ALL_LAUNCHED_PROCESSED=true
-    for n in "${!LAUNCHED[@]}"; do
-      [ -z "${PROCESSED[$n]:-}" ] && ALL_LAUNCHED_PROCESSED=false
-    done
-    [ "$ALL_LAUNCHED_PROCESSED" = true ] && break
+    all_launched_attempts_processed && break
 
     sleep 1
   done
@@ -328,6 +299,111 @@ build_openrouter_payload() {
     }'
 }
 
+# Decides whether to launch `next_attempt` given how `prev_attempt` is doing.
+# Fires immediately if prev already finished (and failed — if it had succeeded,
+# ANY_SUCCESS would already be true and the first check below short-circuits),
+# or once prev has been pending STAGGER_SECONDS with no response. Reads/writes
+# LAUNCHED/LAUNCH_TS/ANY_SUCCESS, which are locals of main() further up the
+# call stack — safe here since this is always called synchronously (never
+# backgrounded) from within main()'s own loop, so no subshell copy is involved.
+maybe_launch_next_attempt() {
+  local prev_attempt="$1"
+  local next_attempt="$2"
+  local now="$3"
+
+  [ "$ANY_SUCCESS" = false ] || return 0
+  [ -n "${LAUNCHED[$prev_attempt]:-}" ] || return 0
+  [ -z "${LAUNCHED[$next_attempt]:-}" ] || return 0
+
+  if [ -n "${PROCESSED[$prev_attempt]:-}" ] || [ $((now - LAUNCH_TS[$prev_attempt])) -ge "$STAGGER_SECONDS" ]; then
+    log_info "[Attempt ${next_attempt}/${MAX_ATTEMPTS}] Issuing a concurrent request to OpenRouter (${MODEL_NAME})..."
+    run_attempt "$next_attempt" &
+    LAUNCHED[$next_attempt]=1
+    LAUNCH_TS[$next_attempt]=$now
+  fi
+}
+
+# Picks up any attempt whose result file has appeared since the last poll,
+# processes it (prints/logs), and marks it done. Same call-stack note as above.
+poll_completed_attempts() {
+  local n result_file
+  for n in 1 2 3; do
+    if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
+      result_file="/tmp/review_result_${RUN_TAG}_${n}.json"
+      if [ -f "$result_file" ]; then
+        process_attempt_result "$result_file" "$n"
+        PROCESSED[$n]=1
+        rm -f "$result_file"
+      fi
+    fi
+  done
+}
+
+all_launched_attempts_processed() {
+  local n
+  for n in "${!LAUNCHED[@]}"; do
+    [ -n "${PROCESSED[$n]:-}" ] || return 1
+  done
+  return 0
+}
+
+# Issues the OpenRouter request for one attempt, writing the raw response body
+# to response_tmpfile. Echoes the HTTP status code ("000" if curl never got one).
+send_review_request() {
+  local response_tmpfile="$1"
+  local http_code
+
+  http_code=$(curl -s -w "%{http_code}" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
+  http_code=$(echo "$http_code" | tr -d '\r\n[:space:]' | tail -c 3)
+  [ -z "$http_code" ] && http_code="000"
+  echo "$http_code"
+}
+
+extract_response_model() {
+  local response_tmpfile="$1"
+  local model
+  model=$(jq -r '.model // empty' "$response_tmpfile" 2>/dev/null || echo "")
+  [ -z "$model" ] && model="unknown"
+  echo "$model"
+}
+
+# Sets status_val/ai_output/notes_count in the caller's scope (run_attempt) —
+# same caller-local-mutation idiom as maybe_launch_next_attempt above, chosen
+# because ai_output can be multi-line, which rules out a simple one-line-per-
+# field stdout protocol like get_excluded_models uses.
+parse_review_verdict() {
+  local http_code="$1"
+  local response_tmpfile="$2"
+  local raw_content parsed_status trimmed_content
+
+  status_val=""
+  ai_output=""
+  notes_count=0
+
+  [ "$http_code" = "200" ] || return 0
+
+  raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
+  parsed_status=$(echo "$raw_content" | jq -r '.status // empty' 2>/dev/null || echo "")
+
+  if [ "$parsed_status" = "LGTM" ]; then
+    status_val="LGTM"
+    ai_output="LGTM"
+  elif [ "$parsed_status" = "ACTION_REQUIRED" ]; then
+    status_val="ACTION_REQUIRED"
+    notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
+    ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
+  else
+    trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
+    if [ "$trimmed_content" = "LGTM" ]; then
+      status_val="LGTM"
+      ai_output="LGTM"
+    fi
+  fi
+}
+
 run_attempt() {
   local attempt_num="$1"
   local result_file="/tmp/review_result_${RUN_TAG}_${attempt_num}.json"
@@ -336,45 +412,17 @@ run_attempt() {
   # appears, or the main loop's poll would wait for it forever.
   trap 'write_fallback_result "$result_file" "$attempt_num"' EXIT
 
-  local response_tmpfile start_ts end_ts latency http_code actual_model raw_content parsed_status
-  local status_val="" ai_output="" notes_count=0 failure_reason="" response_ref=""
+  local response_tmpfile start_ts end_ts latency http_code model
+  local status_val ai_output notes_count failure_reason="" response_ref=""
 
   response_tmpfile=$(mktemp "/tmp/review_attempt_${attempt_num}_XXXXXX.json")
   start_ts=$(date +%s)
-
-  http_code=$(curl -s -w "%{http_code}" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
-    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-    -H "Content-Type: application/json" \
-    --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
-  http_code=$(echo "$http_code" | tr -d '\r\n[:space:]' | tail -c 3)
-  [ -z "$http_code" ] && http_code="000"
-
+  http_code=$(send_review_request "$response_tmpfile")
   end_ts=$(date +%s)
   latency=$((end_ts - start_ts))
+  model=$(extract_response_model "$response_tmpfile")
 
-  actual_model=$(jq -r '.model // empty' "$response_tmpfile" 2>/dev/null || echo "")
-  [ -z "$actual_model" ] && actual_model="unknown"
-
-  raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
-  parsed_status=$(echo "$raw_content" | jq -r '.status // empty' 2>/dev/null || echo "")
-
-  if [ "$http_code" = "200" ]; then
-    if [ "$parsed_status" = "LGTM" ]; then
-      status_val="LGTM"
-      ai_output="LGTM"
-    elif [ "$parsed_status" = "ACTION_REQUIRED" ]; then
-      status_val="ACTION_REQUIRED"
-      notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
-      ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
-    else
-      local trimmed_content
-      trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
-      if [ "$trimmed_content" = "LGTM" ]; then
-        status_val="LGTM"
-        ai_output="LGTM"
-      fi
-    fi
-  fi
+  parse_review_verdict "$http_code" "$response_tmpfile"
 
   if [ -z "$status_val" ]; then
     failure_reason=$(classify_response_failure "$response_tmpfile")
@@ -385,7 +433,7 @@ run_attempt() {
 
   jq -n \
     --argjson attempt "$attempt_num" \
-    --arg model "$actual_model" \
+    --arg model "$model" \
     --arg http_code "$http_code" \
     --arg status "$status_val" \
     --arg output "$ai_output" \
