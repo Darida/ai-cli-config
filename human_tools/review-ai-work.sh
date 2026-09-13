@@ -287,6 +287,9 @@ build_openrouter_payload() {
   local excluded_models="$4"
 
   # https://openrouter.ai/docs/client-sdks/python/components/preferredmaxlatency
+  # A ranking hint (weights provider selection by historical p50), not an
+  # enforced cutoff — ABORT_GRACE_SECONDS in main() is what actually bounds a
+  # slow request.
   jq -n \
     --rawfile text "$prompt_file" \
     --rawfile schema "$schema_file" \
@@ -309,13 +312,12 @@ build_openrouter_payload() {
     }'
 }
 
-# Decides whether to launch `next_attempt` given how `prev_attempt` is doing.
-# Fires immediately if prev already finished (and failed — if it had succeeded,
-# ANY_SUCCESS would already be true and the first check below short-circuits),
-# or once prev has been pending STAGGER_SECONDS with no response. Reads/writes
-# LAUNCHED/LAUNCH_TS/ANY_SUCCESS, which are locals of main() further up the
-# call stack — safe here since this is always called synchronously (never
-# backgrounded) from within main()'s own loop, so no subshell copy is involved.
+# Reads/writes LAUNCHED/LAUNCH_TS/ANY_SUCCESS — locals of main() further up
+# the call stack — safe since this is always called synchronously (never
+# backgrounded) from within main()'s own loop, so no subshell copy is
+# involved. Note: a successful prev already sets ANY_SUCCESS, so the first
+# check below alone is enough to distinguish "prev succeeded" from "prev
+# failed" without inspecting prev's own status here.
 maybe_launch_next_attempt() {
   local prev_attempt="$1"
   local next_attempt="$2"
@@ -389,6 +391,10 @@ abort_and_record_straggler() {
   local header_file="/tmp/review_headers_${RUN_TAG}_${n}.txt"
   local pid gen_id model wait_latency
 
+  # This is how long we waited before giving up, not the model's true
+  # generation time (which /generation could report but which we don't
+  # fetch here) — recorded anyway for visibility, but exclusion already
+  # treats this entry as a failure via status alone, regardless of the value.
   wait_latency=$(( $(date +%s) - LAUNCH_TS[$n] ))
 
   # Read the generation ID before killing anything: run_attempt deletes
@@ -414,15 +420,14 @@ abort_and_record_straggler() {
   log_error "[Attempt ${n}/${MAX_ATTEMPTS}] Aborted ${ABORT_GRACE_SECONDS}s after a winning response arrived (model: ${model}, generation id: ${gen_id:-unknown}); recorded as a failure since it never delivered a result to this run."
 }
 
-# Issues the OpenRouter request for one attempt in the background so it can be
-# killed by the caller, writing its PID to pid_file immediately (before the
-# response can possibly arrive) so a straggler can be aborted once a winning
-# attempt exists elsewhere. Waits for it here; echoes curl's own exit code
-# (0 = completed normally, nonzero = transport error or killed).
+# Runs curl backgrounded (not waited on inline) specifically so its PID can be
+# written to pid_file before any response could possibly arrive — the only
+# way a straggler can later be killed by abort_and_record_straggler.
 send_review_request() {
   local response_tmpfile="$1"
   local header_tmpfile="$2"
   local pid_file="$3"
+  local curl_exit=0
 
   curl -s -D "$header_tmpfile" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
     -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
@@ -431,8 +436,12 @@ send_review_request() {
   local curl_pid=$!
   echo "$curl_pid" > "$pid_file"
 
-  wait "$curl_pid"
-  echo $?
+  # `|| curl_exit=$?`, not a bare `wait`: under `set -e` a failing `wait` (any
+  # curl error, or the kill signal from an abort) would otherwise terminate
+  # this whole backgrounded attempt right here, before its exit code could be
+  # captured or returned.
+  wait "$curl_pid" || curl_exit=$?
+  echo "$curl_exit"
 }
 
 # OpenRouter returns the HTTP status line and an X-Generation-Id header
@@ -499,6 +508,8 @@ parse_review_verdict() {
     notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
     ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
   else
+    # Some models ignore the strict JSON schema and just reply with the plain
+    # word LGTM; accept that as a pass too instead of treating it as a failure.
     trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
     if [ "$trimmed_content" = "LGTM" ]; then
       status_val="LGTM"
@@ -572,6 +583,20 @@ write_fallback_result() {
     > "${result_file}.partial" 2>/dev/null && mv "${result_file}.partial" "$result_file" 2>/dev/null || true
 }
 
+# Updates ANY_SUCCESS/SUCCESS_TS/OVERALL_STATUS — locals of main() further up
+# the call stack, same synchronous-call safety as maybe_launch_next_attempt.
+# ACTION_REQUIRED always wins over LGTM across multiple successful attempts.
+record_success_outcome() {
+  local status_val="$1"
+  [ "$ANY_SUCCESS" = false ] && SUCCESS_TS=$(date +%s)
+  ANY_SUCCESS=true
+  if [ "$status_val" = "ACTION_REQUIRED" ]; then
+    OVERALL_STATUS="ACTION_REQUIRED"
+  elif [ "$OVERALL_STATUS" != "ACTION_REQUIRED" ]; then
+    OVERALL_STATUS="LGTM"
+  fi
+}
+
 process_attempt_result() {
   local result_file="$1"
   local attempt_num="$2"
@@ -589,13 +614,7 @@ process_attempt_result() {
 
   if [ -n "$status_val" ]; then
     record_history_entry "$HISTORY_FILE" "$model" "success" "$notes_count" "$latency" "$generation_id"
-    [ "$ANY_SUCCESS" = false ] && SUCCESS_TS=$(date +%s)
-    ANY_SUCCESS=true
-    if [ "$status_val" = "ACTION_REQUIRED" ]; then
-      OVERALL_STATUS="ACTION_REQUIRED"
-    elif [ "$OVERALL_STATUS" != "ACTION_REQUIRED" ]; then
-      OVERALL_STATUS="LGTM"
-    fi
+    record_success_outcome "$status_val"
 
     log_success "✓ Attempt ${attempt_num} succeeded (model: ${model}, latency: ${latency}s, result: ${status_val})"
     echo -e "${BLUE}======================================================${NC}"
@@ -627,11 +646,15 @@ get_excluded_models() {
   const weekStart = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const monthStart = now.getTime() - 30 * 24 * 60 * 60 * 1000;
 
+  const isFailureEntry = (item) =>
+    item.status === "fail" || (typeof item.latency === "number" && item.latency >= 60);
+
   const failures = {};
 
   for (const item of history) {
-    const isFailure = item.status === "fail" || (typeof item.latency === "number" && item.latency >= 60);
-    if (!isFailure || !item.model) continue;
+    // !item.model here only ever discards unattributed legacy entries: a
+    // failure recorded today always carries at least "unknown", never "".
+    if (!isFailureEntry(item) || !item.model) continue;
     const time = new Date(item.timestamp).getTime();
     if (isNaN(time)) continue;
 
@@ -660,6 +683,10 @@ get_excluded_models() {
   ' "$history_file" 2>/dev/null || printf "\n\n"
 }
 
+# Best-effort categorization for a human skimming failed-attempt logs — not
+# an exhaustive diagnosis, so it deliberately falls back to "unknown" rather
+# than failing itself: the actual response body is always preserved alongside
+# it for real debugging (see the "Debug file:" line each caller logs).
 classify_response_failure() {
   local response_file="$1"
   if [ ! -f "$response_file" ]; then
@@ -691,7 +718,7 @@ record_history_entry() {
   local status_val="$3"
   local notes_cnt="$4"
   local latency_val="$5"
-  local generation_id_val="${6:-}"
+  local generation_id_val="$6"
   local pending_file="/tmp/review_history_pending.json"
 
   node -e '
