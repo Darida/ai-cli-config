@@ -157,6 +157,8 @@ main() {
   MAX_ATTEMPTS=3
   STAGGER_SECONDS=60
   ABORT_GRACE_SECONDS=30
+  GENERATION_LOOKUP_TIMEOUT_SECONDS=30
+  GENERATION_LOOKUP_POLL_INTERVAL=5
   RUN_TAG="$$"
   declare -A LAUNCHED=() PROCESSED=() LAUNCH_TS=()
   ANY_SUCCESS=false
@@ -411,10 +413,15 @@ abort_and_record_straggler() {
     fi
   fi
 
-  sleep 1
-
-  model="unknown"
-  [ -n "$gen_id" ] && model=$(fetch_generation_model "$gen_id")
+  model=""
+  if [ -n "$gen_id" ]; then
+    if ! model=$(fetch_generation_model "$gen_id"); then
+      log_error "⚠️  [Attempt ${n}] Could not resolve the real model for generation ${gen_id} after ${GENERATION_LOOKUP_TIMEOUT_SECONDS}s of polling /generation — recording as \"unknown\". This attempt's own outcome doesn't matter (a different attempt already won); only exclusion-tracking accuracy for this one is affected."
+    fi
+  else
+    log_error "⚠️  [Attempt ${n}] No generation ID was ever captured for this aborted attempt — recording model as \"unknown\"."
+  fi
+  [ -z "$model" ] && model="unknown"
 
   record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$wait_latency" "$gen_id"
   log_error "[Attempt ${n}/${MAX_ATTEMPTS}] Aborted ${ABORT_GRACE_SECONDS}s after a winning response arrived (model: ${model}, generation id: ${gen_id:-unknown}); recorded as a failure since it never delivered a result to this run."
@@ -471,15 +478,29 @@ extract_response_model() {
   echo "$model"
 }
 
-# Recovers the model actually used for a generation we gave up waiting on,
-# via OpenRouter's /generation lookup (the response shape is {data: {model, ...}}).
+# Recovers the model actually used for a generation we gave up waiting on, via
+# OpenRouter's /generation lookup (response shape: {data: {model, ...}}). Polls
+# for up to GENERATION_LOOKUP_TIMEOUT_SECONDS: killing our own connection does
+# not stop the upstream provider from continuing to generate, so the record
+# may not exist yet immediately after an abort. Echoes the model and returns 0
+# once resolved; echoes nothing and returns 1 if the window is exhausted —
+# the caller decides how to surface that, this function never falls back to
+# a placeholder model itself.
 fetch_generation_model() {
   local gen_id="$1"
-  local model
-  model=$(curl -s --connect-timeout 10 --max-time 15 "https://openrouter.ai/api/v1/generation?id=${gen_id}" \
-    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" 2>/dev/null | jq -r '.data.model // empty' 2>/dev/null)
-  [ -z "$model" ] && model="unknown"
-  echo "$model"
+  local deadline model
+  deadline=$(( $(date +%s) + GENERATION_LOOKUP_TIMEOUT_SECONDS ))
+
+  while true; do
+    model=$(curl -s --connect-timeout 10 --max-time 15 "https://openrouter.ai/api/v1/generation?id=${gen_id}" \
+      -H "Authorization: Bearer ${OPENROUTER_API_KEY}" 2>/dev/null | jq -r '.data.model // empty' 2>/dev/null)
+    if [ -n "$model" ]; then
+      echo "$model"
+      return 0
+    fi
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
+    sleep "$GENERATION_LOOKUP_POLL_INTERVAL"
+  done
 }
 
 # Sets status_val/ai_output/notes_count in the caller's scope (run_attempt) —
