@@ -11,7 +11,7 @@ YOUR SOLE GOAL: Read the code diff below and generate a GitHub PR title and desc
 
 OUTPUT REQUIREMENTS:
 - Title: Must be a concise one-liner, less than 250 characters
-- Description: Must be a professional GitHub PR summary with markdown headers and bullet points, less than 10,000 characters
+- Description: Must be a professional GitHub PR summary with markdown headers and bullet points, less than 10,000 characters. Describe the work collectively - what changed and why, at the level of behavior, features, or intent. Do NOT list modified files or spell out per-file edits.
 
 OUTPUT FORMAT (strict - no other text):
 TITLE: <one-line concise title>
