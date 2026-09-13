@@ -129,7 +129,12 @@ main() {
   fi
 
   HISTORY_FILE="$SCRIPT_DIR/history.json"
-  EXCLUDED_MODELS=$(get_excluded_models "$HISTORY_FILE")
+  GET_EXCLUDED_OUTPUT=$(get_excluded_models "$HISTORY_FILE")
+  EXCLUDED_MODELS=$(sed -n '1p' <<< "$GET_EXCLUDED_OUTPUT")
+  MODELS_BELOW_CAP=$(sed -n '2p' <<< "$GET_EXCLUDED_OUTPUT")
+  if [ -n "$MODELS_BELOW_CAP" ]; then
+    log_info "Models with recent failures below the exclusion cap: ${MODELS_BELOW_CAP}"
+  fi
   if [ -n "$EXCLUDED_MODELS" ]; then
     log_info "Excluding models with high failure rates: ${EXCLUDED_MODELS}"
   fi
@@ -307,6 +312,7 @@ build_openrouter_payload() {
   local model_name="$3"
   local excluded_models="$4"
 
+  # https://openrouter.ai/docs/client-sdks/python/components/preferredmaxlatency
   jq -n \
     --rawfile text "$prompt_file" \
     --rawfile schema "$schema_file" \
@@ -323,7 +329,7 @@ build_openrouter_payload() {
         }
       },
       provider: { require_parameters: true, preferred_max_latency: 30 },
-      reasoning: { exclude: true },
+      reasoning: { exclude: true, effort: "low" },
       plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
       messages: [{ role: "user", content: $text }]
     }'
@@ -356,23 +362,28 @@ get_excluded_models() {
     if (isNaN(time)) continue;
 
     if (!failures[item.model]) {
-      failures[item.model] = { today: 0, week: 0, month: 0 };
+      failures[item.model] = { today: 0, week: 0, month: 0, lifetime: 0 };
     }
 
     if (time >= todayStart) failures[item.model].today++;
     if (time >= weekStart) failures[item.model].week++;
     if (time >= monthStart) failures[item.model].month++;
+    failures[item.model].lifetime++;
   }
 
   const excluded = [];
+  const belowCap = [];
   for (const [model, count] of Object.entries(failures)) {
-    if (count.today > 3 || count.week > 6 || count.month > 12) {
+    if (count.today > 3 || count.week > 6 || count.month > 12 || count.lifetime > 24) {
       excluded.push(model);
+    } else {
+      belowCap.push(`${model} (today=${count.today} week=${count.week} month=${count.month} lifetime=${count.lifetime})`);
     }
   }
 
   console.log(excluded.join(" "));
-  ' "$history_file" 2>/dev/null || echo ""
+  console.log(belowCap.join(", "));
+  ' "$history_file" 2>/dev/null || printf "\n\n"
 }
 
 classify_response_failure() {

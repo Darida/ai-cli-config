@@ -285,6 +285,7 @@ build_openrouter_payload() {
   local schema_file="$2"
   local model_name="$3"
 
+  # https://openrouter.ai/docs/client-sdks/python/components/preferredmaxlatency
   jq -n \
     --rawfile text "$prompt_file" \
     --rawfile schema "$schema_file" \
@@ -300,7 +301,7 @@ build_openrouter_payload() {
         }
       },
       provider: { require_parameters: true, preferred_max_latency: 30 },
-      reasoning: { exclude: true },
+      reasoning: { exclude: true, effort: "low" },
       messages: [{ role: "user", content: $text }]
     }'
 }
