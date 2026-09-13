@@ -59,6 +59,11 @@ main() {
   fi
   log_success "✓ Working tree is clean"
 
+  PREVIEW_URL="$(compare_url "$BASE_REF" 2>/dev/null || true)"
+  if [ -n "$PREVIEW_URL" ]; then
+    echo -e "  Preview: ${PREVIEW_URL}\n"
+  fi
+
   DIFF_CONTENT=$(extract_git_diff)
 
   if [ -z "$DIFF_CONTENT" ]; then
@@ -167,7 +172,7 @@ main() {
       elif [ "$PARSED_STATUS" = "ACTION_REQUIRED" ]; then
         STATUS="ACTION_REQUIRED"
         NOTES_COUNT=$(echo "$RAW_CONTENT" | jq -r '.notes | length' 2>/dev/null || echo 0)
-        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "**: " + (.text // .)' 2>/dev/null || echo "")
+        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")
         AI_OUTPUT="ACTION_REQUIRED"$'\n'"${FORMATTED_NOTES}"
         record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" "$NOTES_COUNT"
         rm -f "$RESPONSE_TMPFILE"
@@ -213,6 +218,20 @@ main() {
     log_error "❌ Review failed with status: ${STATUS}"
     exit 1
   fi
+}
+
+compare_url() {
+  local base_ref="$1"
+  local remote_url org_repo base_branch current_branch
+  remote_url="$(git remote get-url origin 2>/dev/null)" || return 1
+  current_branch="$(git branch --show-current 2>/dev/null)"
+  [ -z "$current_branch" ] && return 1
+  base_branch="${base_ref#origin/}"
+  case "$base_branch" in
+    *~*|*^*) return 1 ;;  # not a real branch name (e.g. HEAD~1), no meaningful compare link
+  esac
+  org_repo="$(echo "$remote_url" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
+  echo "https://github.com/$org_repo/compare/${base_branch}...${current_branch}?expand=1"
 }
 
 extract_git_diff() {
