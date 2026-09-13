@@ -141,89 +141,65 @@ main() {
 
   build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" "$EXCLUDED_MODELS" > "$PAYLOAD_TMPFILE"
 
-  MAX_RETRIES=3
-  ATTEMPT=1
-  STATUS=""
-  AI_OUTPUT=""
+  # Hedged-parallel attempts. Attempt 1 fires immediately; attempt N+1 fires as
+  # soon as attempt N is either known-failed or has been pending STAGGER_SECONDS
+  # with no response — whichever comes first. Once any attempt succeeds, no
+  # further attempt is launched, and each attempt still in flight keeps running
+  # (still printed if it succeeds too) until it passes its own abort deadline —
+  # see maybe_abort_stragglers for why that's not simply ABORT_GRACE_SECONDS
+  # past the win for every attempt. A killed attempt is always recorded as a
+  # failure — even if OpenRouter shows it completing successfully afterward,
+  # it never delivered a usable result to this run — but its generation ID
+  # (captured from response headers within seconds, long before slow
+  # generations finish) lets us recover the real model via /generation?id=...
+  # so exclusion tracking still learns the truth instead of losing the data.
+  # All printing/history-writing happens only in the single main loop (never
+  # inside a backgrounded attempt), so concurrent outputs never interleave.
+  MAX_ATTEMPTS=3
+  STAGGER_SECONDS=60
+  ABORT_GRACE_SECONDS=30
+  GENERATION_LOOKUP_TIMEOUT_SECONDS=30
+  GENERATION_LOOKUP_POLL_INTERVAL=5
+  RUN_TAG="$$"
+  declare -A LAUNCHED=() PROCESSED=() LAUNCH_TS=()
+  ANY_SUCCESS=false
+  SUCCESS_TS=""
+  OVERALL_STATUS=""
   FAILED_ATTEMPT_FILES=()
 
-  while [ "$ATTEMPT" -le "$MAX_RETRIES" ]; do
-    RESPONSE_TMPFILE=$(mktemp "/tmp/review_attempt_${ATTEMPT}_XXXXXX.json")
+  log_info "Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)..."
+  run_attempt 1 &
+  LAUNCHED[1]=1
+  LAUNCH_TS[1]=$(date +%s)
 
-    if [ "$ATTEMPT" -gt 1 ]; then
-      log_info "[Attempt $ATTEMPT/$MAX_RETRIES] Retrying API call to OpenRouter (${MODEL_NAME})..."
-    else
-      log_info "Sending request to OpenRouter API (model: ${MODEL_NAME}, payload size: ${PROMPT_SIZE_KB}KB)..."
-    fi
+  log_info "[3/3] AI Code Review Notes for Manual Reviewer (printed as each attempt completes):"
+  echo -e "  Rules: ${RULES_URL}"
 
-    HTTP_CODE=$(curl -s -w "%{http_code}" -o "$RESPONSE_TMPFILE" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
-      -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
-      -H "Content-Type: application/json" \
-      --data-binary "@$PAYLOAD_TMPFILE" || echo "000")
+  while true; do
+    NOW=$(date +%s)
 
-    HTTP_CODE=$(echo "$HTTP_CODE" | tr -d '\r\n[:space:]' | tail -c 3)
-    [ -z "$HTTP_CODE" ] && HTTP_CODE="000"
+    maybe_launch_next_attempt 1 2 "$NOW"
+    maybe_launch_next_attempt 2 3 "$NOW"
+    poll_completed_attempts
+    maybe_abort_stragglers "$NOW"
 
-    ACTUAL_MODEL=$(jq -r '.model // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "$MODEL_NAME")
+    all_launched_attempts_processed && break
 
-    RAW_CONTENT=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$RESPONSE_TMPFILE" 2>/dev/null || echo "")
-    PARSED_STATUS=$(echo "$RAW_CONTENT" | jq -r '.status // empty' 2>/dev/null || echo "")
-
-    if [ "$HTTP_CODE" = "200" ]; then
-      if [ "$PARSED_STATUS" = "LGTM" ]; then
-        STATUS="LGTM"
-        AI_OUTPUT="LGTM"
-        record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" 0
-        rm -f "$RESPONSE_TMPFILE"
-        break
-      elif [ "$PARSED_STATUS" = "ACTION_REQUIRED" ]; then
-        STATUS="ACTION_REQUIRED"
-        NOTES_COUNT=$(echo "$RAW_CONTENT" | jq -r '.notes | length' 2>/dev/null || echo 0)
-        FORMATTED_NOTES=$(echo "$RAW_CONTENT" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")
-        AI_OUTPUT="ACTION_REQUIRED"$'\n'"${FORMATTED_NOTES}"
-        record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" "$NOTES_COUNT"
-        rm -f "$RESPONSE_TMPFILE"
-        break
-      else
-        TRIMMED_CONTENT=$(echo "$RAW_CONTENT" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
-        if [ "$TRIMMED_CONTENT" = "LGTM" ]; then
-          STATUS="LGTM"
-          AI_OUTPUT="LGTM"
-          record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "success" 0
-          rm -f "$RESPONSE_TMPFILE"
-          break
-        fi
-      fi
-    fi
-
-    # Attempt failed — preserve tmp file for debugging and record failure
-    FAILURE_REASON=$(classify_response_failure "$RESPONSE_TMPFILE")
-    record_history_entry "$HISTORY_FILE" "$ACTUAL_MODEL" "fail" 0
-    FAILED_ATTEMPT_FILES+=("$RESPONSE_TMPFILE")
-    log_error "[ERROR] Attempt $ATTEMPT/$MAX_RETRIES failed (HTTP Status: ${HTTP_CODE}, Model: ${ACTUAL_MODEL}, Reason: ${FAILURE_REASON}). Debug file: file://${RESPONSE_TMPFILE}"
-
-    ATTEMPT=$((ATTEMPT + 1))
     sleep 1
   done
 
-  if [ -z "$STATUS" ]; then
-    STATUS="UNKNOWN"
-    AI_OUTPUT="Error: Failed to obtain valid AI review response after $MAX_RETRIES attempts.\nPreserved attempt debug files:\n"
+  if [ "$ANY_SUCCESS" = false ]; then
+    log_error "❌ Failed to obtain any valid AI review response after ${MAX_ATTEMPTS} attempts."
     for f in "${FAILED_ATTEMPT_FILES[@]}"; do
-      AI_OUTPUT="${AI_OUTPUT}  - file://${f}\n"
+      log_error "  - file://${f}"
     done
+    exit 1
   fi
 
-  log_success "✓ AI review complete (Result: ${STATUS})\n"
+  log_success "✓ AI review complete (Overall Result: ${OVERALL_STATUS})"
 
-  log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
-  echo -e "  Rules: ${RULES_URL}"
-  echo -e "${BLUE}======================================================${NC}"
-  echo -e "$AI_OUTPUT"
-  echo -e "${BLUE}======================================================${NC}"
-
-  if [ "$STATUS" = "ACTION_REQUIRED" ] || [ "$STATUS" = "UNKNOWN" ]; then
-    log_error "❌ Review failed with status: ${STATUS}"
+  if [ "$OVERALL_STATUS" = "ACTION_REQUIRED" ]; then
+    log_error "❌ Review failed with status: ${OVERALL_STATUS}"
     exit 1
   fi
 }
@@ -313,6 +289,9 @@ build_openrouter_payload() {
   local excluded_models="$4"
 
   # https://openrouter.ai/docs/client-sdks/python/components/preferredmaxlatency
+  # A ranking hint (weights provider selection by historical p50), not an
+  # enforced cutoff — ABORT_GRACE_SECONDS in main() is what actually bounds a
+  # slow request.
   jq -n \
     --rawfile text "$prompt_file" \
     --rawfile schema "$schema_file" \
@@ -335,6 +314,333 @@ build_openrouter_payload() {
     }'
 }
 
+# Reads/writes LAUNCHED/LAUNCH_TS/ANY_SUCCESS — locals of main() further up
+# the call stack — safe since this is always called synchronously (never
+# backgrounded) from within main()'s own loop, so no subshell copy is involved.
+maybe_launch_next_attempt() {
+  local prev_attempt="$1"
+  local next_attempt="$2"
+  local now="$3"
+
+  [ "$ANY_SUCCESS" = false ] || return 0
+  [ -n "${LAUNCHED[$prev_attempt]:-}" ] || return 0
+  [ -z "${LAUNCHED[$next_attempt]:-}" ] || return 0
+
+  if [ -n "${PROCESSED[$prev_attempt]:-}" ] || [ $((now - LAUNCH_TS[$prev_attempt])) -ge "$STAGGER_SECONDS" ]; then
+    log_info "[Attempt ${next_attempt}/${MAX_ATTEMPTS}] Issuing a concurrent request to OpenRouter (${MODEL_NAME})..."
+    run_attempt "$next_attempt" &
+    LAUNCHED[$next_attempt]=1
+    LAUNCH_TS[$next_attempt]=$now
+  fi
+}
+
+# Picks up any attempt whose result file has appeared since the last poll,
+# processes it (prints/logs), and marks it done. Same call-stack note as above.
+poll_completed_attempts() {
+  local n result_file
+  for n in 1 2 3; do
+    if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
+      result_file="/tmp/review_result_${RUN_TAG}_${n}.json"
+      if [ -f "$result_file" ]; then
+        process_attempt_result "$result_file" "$n"
+        PROCESSED[$n]=1
+        rm -f "$result_file"
+      fi
+    fi
+  done
+}
+
+all_launched_attempts_processed() {
+  local n
+  for n in "${!LAUNCHED[@]}"; do
+    [ -n "${PROCESSED[$n]:-}" ] || return 1
+  done
+  return 0
+}
+
+# Once a winning attempt exists, kill each still-running attempt once it
+# passes its own deadline: whichever is later of (a) ABORT_GRACE_SECONDS past
+# the win, or (b) STAGGER_SECONDS of the attempt's own runtime — so a hedge
+# attempt is never cut short before it's had as fair a shot as attempt 1 got.
+# Each attempt's deadline is independent, so stragglers can die on different ticks.
+maybe_abort_stragglers() {
+  local now="$1"
+  [ "$ANY_SUCCESS" = true ] || return 0
+
+  local n deadline grace_deadline
+  grace_deadline=$((SUCCESS_TS + ABORT_GRACE_SECONDS))
+  for n in 1 2 3; do
+    if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
+      deadline=$((LAUNCH_TS[$n] + STAGGER_SECONDS))
+      [ "$grace_deadline" -gt "$deadline" ] && deadline="$grace_deadline"
+      if [ "$now" -ge "$deadline" ]; then
+        abort_and_record_straggler "$n"
+        PROCESSED[$n]=1
+      fi
+    fi
+  done
+}
+
+# See main()'s hedging overview for why a killed attempt is always recorded
+# as a failure regardless of what OpenRouter shows for it afterward.
+abort_and_record_straggler() {
+  local n="$1"
+  local pid_file="/tmp/review_pid_${RUN_TAG}_${n}"
+  local header_file="/tmp/review_headers_${RUN_TAG}_${n}.txt"
+  local pid gen_id model wait_latency
+
+  # This is how long we waited before giving up, not the model's true
+  # generation time — status already marks this a failure regardless.
+  wait_latency=$(( $(date +%s) - LAUNCH_TS[$n] ))
+
+  # Read the generation ID before killing anything: run_attempt deletes
+  # header_file/pid_file itself once its curl exits (killed or not), so
+  # reading first — while the attempt is still definitely running — avoids
+  # racing that cleanup. Headers are long since fully written by this point
+  # regardless (they arrive within seconds; we only ever get here 90s+ in).
+  gen_id=$(extract_generation_id "$header_file")
+
+  if [ -f "$pid_file" ]; then
+    pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  fi
+
+  model=""
+  if [ -n "$gen_id" ]; then
+    if ! model=$(fetch_generation_model "$gen_id"); then
+      log_error "⚠️  [Attempt ${n}] Could not resolve the real model for generation ${gen_id} after ${GENERATION_LOOKUP_TIMEOUT_SECONDS}s of polling /generation — recording as \"unknown\". This attempt's own outcome doesn't matter (a different attempt already won); only exclusion-tracking accuracy for this one is affected."
+    fi
+  else
+    log_error "⚠️  [Attempt ${n}] No generation ID was ever captured for this aborted attempt — recording model as \"unknown\"."
+  fi
+  [ -z "$model" ] && model="unknown"
+
+  record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$wait_latency" "$gen_id"
+  log_error "[Attempt ${n}/${MAX_ATTEMPTS}] Aborted ${ABORT_GRACE_SECONDS}s after a winning response arrived (model: ${model}, generation id: ${gen_id:-unknown}); recorded as a failure since it never delivered a result to this run."
+}
+
+# Runs curl backgrounded (not waited on inline) specifically so its PID can be
+# written to pid_file before any response could possibly arrive — the only
+# way a straggler can later be killed by abort_and_record_straggler.
+send_review_request() {
+  local response_tmpfile="$1"
+  local header_tmpfile="$2"
+  local pid_file="$3"
+  local curl_exit=0
+
+  curl -s -D "$header_tmpfile" -o "$response_tmpfile" --connect-timeout 15 -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@$PAYLOAD_TMPFILE" &
+  local curl_pid=$!
+  echo "$curl_pid" > "$pid_file"
+
+  # `|| curl_exit=$?`, not a bare `wait`: under `set -e` a failing `wait` (any
+  # curl error, or the kill signal from an abort) would otherwise terminate
+  # this whole backgrounded attempt right here, before its exit code could be
+  # captured or returned.
+  wait "$curl_pid" || curl_exit=$?
+  echo "$curl_exit"
+}
+
+# OpenRouter returns the HTTP status line and an X-Generation-Id header
+# within seconds, regardless of how long the generation itself takes to
+# finish — both are already in header_file well before a slow response body.
+extract_http_status() {
+  local header_file="$1"
+  local code
+  code=$(grep -m1 -E '^HTTP/' "$header_file" 2>/dev/null | awk '{print $2}')
+  [ -z "$code" ] && code="000"
+  echo "$code"
+}
+
+extract_generation_id() {
+  local header_file="$1"
+  local gen_id
+  gen_id=$(grep -i -m1 '^x-generation-id:' "$header_file" 2>/dev/null | cut -d: -f2- | tr -d '\r' | xargs)
+  echo "$gen_id"
+}
+
+extract_response_model() {
+  local response_tmpfile="$1"
+  local model
+  model=$(jq -r '.model // empty' "$response_tmpfile" 2>/dev/null || echo "")
+  [ -z "$model" ] && model="unknown"
+  echo "$model"
+}
+
+# Recovers the model actually used for a generation we gave up waiting on, via
+# OpenRouter's /generation lookup (response shape: {data: {model, ...}}). Polls
+# for up to GENERATION_LOOKUP_TIMEOUT_SECONDS: killing our own connection does
+# not stop the upstream provider from continuing to generate, so the record
+# may not exist yet immediately after an abort. Echoes the model and returns 0
+# once resolved; echoes nothing and returns 1 if the window is exhausted —
+# the caller decides how to surface that, this function never falls back to
+# a placeholder model itself.
+fetch_generation_model() {
+  local gen_id="$1"
+  local deadline model
+  deadline=$(( $(date +%s) + GENERATION_LOOKUP_TIMEOUT_SECONDS ))
+
+  while true; do
+    model=$(curl -s --connect-timeout 10 --max-time 15 "https://openrouter.ai/api/v1/generation?id=${gen_id}" \
+      -H "Authorization: Bearer ${OPENROUTER_API_KEY}" 2>/dev/null | jq -r '.data.model // empty' 2>/dev/null)
+    if [ -n "$model" ]; then
+      echo "$model"
+      return 0
+    fi
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
+    sleep "$GENERATION_LOOKUP_POLL_INTERVAL"
+  done
+}
+
+# Parses an OpenRouter response into a verdict, emitted as JSON on stdout:
+# {status, output, notes_count}. A verdict is accepted as LGTM/ACTION_REQUIRED
+# either via the strict JSON schema, or — since some models ignore it — a
+# reply that's just the plain word LGTM. Anything else, including a non-200
+# response, yields status "".
+parse_review_verdict() {
+  local http_code="$1"
+  local response_tmpfile="$2"
+  local raw_content parsed_status trimmed_content
+  local status_val="" ai_output="" notes_count=0
+
+  if [ "$http_code" = "200" ]; then
+    raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
+    parsed_status=$(echo "$raw_content" | jq -r '.status // empty' 2>/dev/null || echo "")
+
+    if [ "$parsed_status" = "LGTM" ]; then
+      status_val="LGTM"
+      ai_output="LGTM"
+    elif [ "$parsed_status" = "ACTION_REQUIRED" ]; then
+      status_val="ACTION_REQUIRED"
+      notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
+      ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
+    else
+      trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
+      if [ "$trimmed_content" = "LGTM" ]; then
+        status_val="LGTM"
+        ai_output="LGTM"
+      fi
+    fi
+  fi
+
+  jq -n --arg status "$status_val" --arg output "$ai_output" --argjson notes_count "$notes_count" \
+    '{status: $status, output: $output, notes_count: $notes_count}'
+}
+
+run_attempt() {
+  local attempt_num="$1"
+  local result_file="/tmp/review_result_${RUN_TAG}_${attempt_num}.json"
+  local header_file="/tmp/review_headers_${RUN_TAG}_${attempt_num}.txt"
+  local pid_file="/tmp/review_pid_${RUN_TAG}_${attempt_num}"
+  # Safety net: this runs backgrounded under `set -e` — if anything here fails
+  # unexpectedly before the normal result write, guarantee a result file still
+  # appears, or the main loop's poll would wait for it forever.
+  trap 'write_fallback_result "$result_file" "$attempt_num"; rm -f "$pid_file"' EXIT
+
+  local response_tmpfile start_ts end_ts latency curl_exit http_code model gen_id verdict_json
+  local status_val ai_output notes_count failure_reason="" response_ref=""
+
+  response_tmpfile=$(mktemp "/tmp/review_attempt_${attempt_num}_XXXXXX.json")
+  start_ts=$(date +%s)
+  curl_exit=$(send_review_request "$response_tmpfile" "$header_file" "$pid_file")
+  end_ts=$(date +%s)
+  latency=$((end_ts - start_ts))
+
+  http_code=$(extract_http_status "$header_file")
+  gen_id=$(extract_generation_id "$header_file")
+  model=$(extract_response_model "$response_tmpfile")
+
+  if [ "$curl_exit" = "0" ]; then
+    verdict_json=$(parse_review_verdict "$http_code" "$response_tmpfile")
+  else
+    verdict_json='{"status":"","output":"","notes_count":0}'
+  fi
+  status_val=$(jq -r '.status' <<< "$verdict_json")
+  ai_output=$(jq -r '.output' <<< "$verdict_json")
+  notes_count=$(jq -r '.notes_count' <<< "$verdict_json")
+
+  if [ -z "$status_val" ]; then
+    failure_reason=$(classify_response_failure "$response_tmpfile")
+    [ "$curl_exit" != "0" ] && failure_reason="aborted or transport error (curl exit ${curl_exit})"
+    response_ref="$response_tmpfile"
+  else
+    rm -f "$response_tmpfile"
+  fi
+
+  jq -n \
+    --argjson attempt "$attempt_num" \
+    --arg model "$model" \
+    --arg http_code "$http_code" \
+    --arg status "$status_val" \
+    --arg output "$ai_output" \
+    --argjson notes_count "$notes_count" \
+    --argjson latency "$latency" \
+    --arg failure_reason "$failure_reason" \
+    --arg response_file "$response_ref" \
+    --arg generation_id "$gen_id" \
+    '{attempt: $attempt, model: $model, http_code: $http_code, status: $status, output: $output, notes_count: $notes_count, latency: $latency, failure_reason: $failure_reason, response_file: $response_file, generation_id: $generation_id}' \
+    > "${result_file}.partial"
+  mv "${result_file}.partial" "$result_file"
+  rm -f "$header_file" "$pid_file"
+}
+
+write_fallback_result() {
+  local result_file="$1"
+  local attempt_num="$2"
+  [ -f "$result_file" ] && return 0
+  jq -n --argjson attempt "$attempt_num" \
+    '{attempt: $attempt, model: "unknown", http_code: "000", status: "", output: "", notes_count: 0, latency: 0, failure_reason: "unexpected script error", response_file: "", generation_id: ""}' \
+    > "${result_file}.partial" 2>/dev/null && mv "${result_file}.partial" "$result_file" 2>/dev/null || true
+}
+
+# Updates ANY_SUCCESS/SUCCESS_TS/OVERALL_STATUS — locals of main() further up
+# the call stack, same synchronous-call safety as maybe_launch_next_attempt.
+# ACTION_REQUIRED always wins over LGTM across multiple successful attempts.
+record_success_outcome() {
+  local status_val="$1"
+  [ "$ANY_SUCCESS" = false ] && SUCCESS_TS=$(date +%s)
+  ANY_SUCCESS=true
+  if [ "$status_val" = "ACTION_REQUIRED" ]; then
+    OVERALL_STATUS="ACTION_REQUIRED"
+  elif [ "$OVERALL_STATUS" != "ACTION_REQUIRED" ]; then
+    OVERALL_STATUS="LGTM"
+  fi
+}
+
+process_attempt_result() {
+  local result_file="$1"
+  local attempt_num="$2"
+  local model status_val output notes_count latency http_code failure_reason response_file generation_id
+
+  model=$(jq -r '.model' "$result_file")
+  status_val=$(jq -r '.status' "$result_file")
+  output=$(jq -r '.output' "$result_file")
+  notes_count=$(jq -r '.notes_count' "$result_file")
+  latency=$(jq -r '.latency' "$result_file")
+  http_code=$(jq -r '.http_code' "$result_file")
+  failure_reason=$(jq -r '.failure_reason' "$result_file")
+  response_file=$(jq -r '.response_file' "$result_file")
+  generation_id=$(jq -r '.generation_id // empty' "$result_file")
+
+  if [ -n "$status_val" ]; then
+    record_history_entry "$HISTORY_FILE" "$model" "success" "$notes_count" "$latency" "$generation_id"
+    record_success_outcome "$status_val"
+
+    log_success "✓ Attempt ${attempt_num} succeeded (model: ${model}, latency: ${latency}s, result: ${status_val})"
+    echo -e "${BLUE}======================================================${NC}"
+    echo -e "$output"
+    echo -e "${BLUE}======================================================${NC}"
+  else
+    record_history_entry "$HISTORY_FILE" "$model" "fail" 0 "$latency" "$generation_id"
+    FAILED_ATTEMPT_FILES+=("$response_file")
+    log_error "[ERROR] Attempt ${attempt_num}/${MAX_ATTEMPTS} failed (HTTP Status: ${http_code}, Model: ${model}, Reason: ${failure_reason}, Latency: ${latency}s). Debug file: file://${response_file}"
+  fi
+}
+
 get_excluded_models() {
   local history_file="$1"
   node -e '
@@ -354,10 +660,14 @@ get_excluded_models() {
   const weekStart = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const monthStart = now.getTime() - 30 * 24 * 60 * 60 * 1000;
 
+  // A model counts against exclusion for an outright failure, or for a
+  // "success" that was too slow to be useful (>= 60s) to be worth much.
+  const countsAsExclusionFailure = (item) => item.status === "fail" || item.latency >= 60;
+
   const failures = {};
 
   for (const item of history) {
-    if (item.status !== "fail" || !item.model) continue;
+    if (!countsAsExclusionFailure(item)) continue;
     const time = new Date(item.timestamp).getTime();
     if (isNaN(time)) continue;
 
@@ -386,6 +696,10 @@ get_excluded_models() {
   ' "$history_file" 2>/dev/null || printf "\n\n"
 }
 
+# Best-effort categorization for a human skimming failed-attempt logs — not
+# an exhaustive diagnosis, so it deliberately falls back to "unknown" rather
+# than failing itself: the actual response body is always preserved alongside
+# it for real debugging (see the "Debug file:" line each caller logs).
 classify_response_failure() {
   local response_file="$1"
   if [ ! -f "$response_file" ]; then
@@ -416,16 +730,21 @@ record_history_entry() {
   local model_name="$2"
   local status_val="$3"
   local notes_cnt="$4"
+  local latency_val="$5"
+  local generation_id_val="$6"
   local pending_file="/tmp/review_history_pending.json"
+  local node_error
 
-  node -e '
+  node_error=$(node -e '
   const fs = require("fs");
   const pendingFile = process.argv[1];
   const entry = {
     timestamp: new Date().toISOString(),
     model: process.argv[2],
     status: process.argv[3],
-    notes_count: parseInt(process.argv[4], 10) || 0
+    notes_count: parseInt(process.argv[4], 10) || 0,
+    latency: parseInt(process.argv[5], 10) || 0,
+    generation_id: process.argv[6] || ""
   };
 
   let history = [];
@@ -439,7 +758,8 @@ record_history_entry() {
 
   history.push(entry);
   fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
-  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" 2>/dev/null || true
+  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" "$latency_val" "$generation_id_val" 2>&1 >/dev/null) || \
+    log_error "⚠️  Failed to persist history entry (model: ${model_name}, status: ${status_val}, latency: ${latency_val}s) — this record is lost, not delayed. ${node_error}"
 }
 
 flush_and_commit_history() {
