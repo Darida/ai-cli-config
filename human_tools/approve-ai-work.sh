@@ -299,7 +299,7 @@ build_openrouter_payload() {
           schema: ($schema | fromjson)
         }
       },
-      provider: { require_parameters: true },
+      provider: { require_parameters: true, preferred_max_latency: 30 },
       reasoning: { exclude: true },
       messages: [{ role: "user", content: $text }]
     }'

@@ -319,7 +319,7 @@ build_openrouter_payload() {
           schema: ($schema | fromjson)
         }
       },
-      provider: { require_parameters: true },
+      provider: { require_parameters: true, preferred_max_latency: 30 },
       reasoning: { exclude: true },
       plugins: (if ($excluded | length > 0) then [{ id: "auto-router", allowed_models: (["*"] + ($excluded | split(" ") | map("!" + .))) }] else [] end),
       messages: [{ role: "user", content: $text }]
