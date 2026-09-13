@@ -667,10 +667,7 @@ get_excluded_models() {
   const failures = {};
 
   for (const item of history) {
-    // A failure recorded today always carries a model, at least "unknown" —
-    // !item.model here excludes only the small set of existing entries from
-    // before model attribution existed, which have no model to exclude by.
-    if (!countsAsExclusionFailure(item) || !item.model) continue;
+    if (!countsAsExclusionFailure(item)) continue;
     const time = new Date(item.timestamp).getTime();
     if (isNaN(time)) continue;
 

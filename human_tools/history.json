@@ -63,13 +63,6 @@
     "latency": 0
   },
   {
-    "timestamp": "2026-08-03T16:37:05.682Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
     "timestamp": "2026-08-03T16:37:56.161Z",
     "model": "google/gemma-4-26b-a4b-it:free",
     "status": "success",
@@ -217,20 +210,6 @@
     "latency": 0
   },
   {
-    "timestamp": "2026-09-13T00:09:11.849Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T00:32:00.463Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
     "timestamp": "2026-09-13T00:34:45.636Z",
     "model": "nex-agi/nex-n2.5-mini:free",
     "status": "success",
@@ -287,31 +266,10 @@
     "latency": 0
   },
   {
-    "timestamp": "2026-09-13T02:44:06.728Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
     "timestamp": "2026-09-13T02:46:20.182Z",
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
     "notes_count": 2,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T02:56:14.683Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T03:00:15.891Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
     "latency": 0
   },
   {
@@ -325,13 +283,6 @@
     "timestamp": "2026-09-13T04:43:51.093Z",
     "model": "liquid/lfm-2.5-2.6b:free",
     "status": "success",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T05:18:36.006Z",
-    "model": "",
-    "status": "fail",
     "notes_count": 0,
     "latency": 0
   },
@@ -385,13 +336,6 @@
     "latency": 0
   },
   {
-    "timestamp": "2026-09-13T08:20:06.742Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
     "timestamp": "2026-09-13T08:20:17.296Z",
     "model": "nex-agi/nex-n2.5-pro:free",
     "status": "success",
@@ -417,27 +361,6 @@
     "model": "nvidia/nemotron-3-super-120b-a12b:free",
     "status": "success",
     "notes_count": 2,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T19:37:53.645Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T19:41:54.903Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
-    "latency": 0
-  },
-  {
-    "timestamp": "2026-09-13T19:45:56.166Z",
-    "model": "",
-    "status": "fail",
-    "notes_count": 0,
     "latency": 0
   },
   {
