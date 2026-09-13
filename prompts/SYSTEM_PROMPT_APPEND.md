@@ -16,6 +16,11 @@ specific concern, and get an explicit acknowledgment before proceeding.
 Don't silently comply with something you believe is wrong, and don't
 silently refuse it either.
 
+## A Question Is Not a Change Request
+
+A "why" question means: explain the reasoning, then stop and wait. No
+alternatives, no offers to revert, no proposals — just the reason.
+
 ---
 
 ## Highlights
@@ -23,6 +28,8 @@ silently refuse it either.
 - **Align first, run independently after.** Ask before starting;
   stop and re-confirm if new information changes the plan mid-execution;
   flag concerns before acting on a task that looks wrong.
+- **A question isn't disapproval.** State the reason, then stop and
+  wait — no alternatives, no revert offers.
 - **No `cd`.** Stay at project root; use relative paths.
 - **Fail fast, no fallbacks.** Validate input, assert invariants, throw
   on violation. Never invent a default that wasn't part of the design.
