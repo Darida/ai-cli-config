@@ -379,14 +379,8 @@ maybe_abort_stragglers() {
   done
 }
 
-# Kills one still-running attempt and records it — always as a failure. A
-# request we gave up on never delivered a usable result to this run, no
-# matter what OpenRouter itself shows for it afterward. Its generation ID
-# (already captured from response headers, which arrive within seconds
-# regardless of how long the generation itself takes) lets us recover the
-# real model via /generation?id=... so exclusion tracking still attributes
-# the failure correctly instead of losing the data the way an abandoned
-# request otherwise would.
+# See main()'s hedging overview for why a killed attempt is always recorded
+# as a failure regardless of what OpenRouter shows for it afterward.
 abort_and_record_straggler() {
   local n="$1"
   local pid_file="/tmp/review_pid_${RUN_TAG}_${n}"
@@ -452,9 +446,8 @@ send_review_request() {
 }
 
 # OpenRouter returns the HTTP status line and an X-Generation-Id header
-# immediately — within seconds, well before a slow generation's body
-# completes (verified directly: an aborted request to a model that took
-# 1000+ seconds still had both in its header dump within the first 8s).
+# within seconds, regardless of how long the generation itself takes to
+# finish — both are already in header_file well before a slow response body.
 extract_http_status() {
   local header_file="$1"
   local code
@@ -503,40 +496,39 @@ fetch_generation_model() {
   done
 }
 
-# Sets status_val/ai_output/notes_count in the caller's scope (run_attempt) —
-# same caller-local-mutation idiom as maybe_launch_next_attempt above, chosen
-# because ai_output can be multi-line, which rules out a simple one-line-per-
-# field stdout protocol like get_excluded_models uses.
+# Parses an OpenRouter response into a verdict, emitted as JSON on stdout:
+# {status, output, notes_count}. status is "" for anything that isn't a clean
+# LGTM/ACTION_REQUIRED verdict, including a non-200 response.
 parse_review_verdict() {
   local http_code="$1"
   local response_tmpfile="$2"
   local raw_content parsed_status trimmed_content
+  local status_val="" ai_output="" notes_count=0
 
-  status_val=""
-  ai_output=""
-  notes_count=0
+  if [ "$http_code" = "200" ]; then
+    raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
+    parsed_status=$(echo "$raw_content" | jq -r '.status // empty' 2>/dev/null || echo "")
 
-  [ "$http_code" = "200" ] || return 0
-
-  raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
-  parsed_status=$(echo "$raw_content" | jq -r '.status // empty' 2>/dev/null || echo "")
-
-  if [ "$parsed_status" = "LGTM" ]; then
-    status_val="LGTM"
-    ai_output="LGTM"
-  elif [ "$parsed_status" = "ACTION_REQUIRED" ]; then
-    status_val="ACTION_REQUIRED"
-    notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
-    ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
-  else
-    # Some models ignore the strict JSON schema and just reply with the plain
-    # word LGTM; accept that as a pass too instead of treating it as a failure.
-    trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
-    if [ "$trimmed_content" = "LGTM" ]; then
+    if [ "$parsed_status" = "LGTM" ]; then
       status_val="LGTM"
       ai_output="LGTM"
+    elif [ "$parsed_status" = "ACTION_REQUIRED" ]; then
+      status_val="ACTION_REQUIRED"
+      notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
+      ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
+    else
+      # Some models ignore the strict JSON schema and just reply with the plain
+      # word LGTM; accept that as a pass too instead of treating it as a failure.
+      trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
+      if [ "$trimmed_content" = "LGTM" ]; then
+        status_val="LGTM"
+        ai_output="LGTM"
+      fi
     fi
   fi
+
+  jq -n --arg status "$status_val" --arg output "$ai_output" --argjson notes_count "$notes_count" \
+    '{status: $status, output: $output, notes_count: $notes_count}'
 }
 
 run_attempt() {
@@ -549,7 +541,7 @@ run_attempt() {
   # appears, or the main loop's poll would wait for it forever.
   trap 'write_fallback_result "$result_file" "$attempt_num"; rm -f "$pid_file"' EXIT
 
-  local response_tmpfile start_ts end_ts latency curl_exit http_code model gen_id
+  local response_tmpfile start_ts end_ts latency curl_exit http_code model gen_id verdict_json
   local status_val ai_output notes_count failure_reason="" response_ref=""
 
   response_tmpfile=$(mktemp "/tmp/review_attempt_${attempt_num}_XXXXXX.json")
@@ -563,12 +555,13 @@ run_attempt() {
   model=$(extract_response_model "$response_tmpfile")
 
   if [ "$curl_exit" = "0" ]; then
-    parse_review_verdict "$http_code" "$response_tmpfile"
+    verdict_json=$(parse_review_verdict "$http_code" "$response_tmpfile")
   else
-    status_val=""
-    ai_output=""
-    notes_count=0
+    verdict_json='{"status":"","output":"","notes_count":0}'
   fi
+  status_val=$(jq -r '.status' <<< "$verdict_json")
+  ai_output=$(jq -r '.output' <<< "$verdict_json")
+  notes_count=$(jq -r '.notes_count' <<< "$verdict_json")
 
   if [ -z "$status_val" ]; then
     failure_reason=$(classify_response_failure "$response_tmpfile")
@@ -741,8 +734,9 @@ record_history_entry() {
   local latency_val="$5"
   local generation_id_val="$6"
   local pending_file="/tmp/review_history_pending.json"
+  local node_error
 
-  node -e '
+  node_error=$(node -e '
   const fs = require("fs");
   const pendingFile = process.argv[1];
   const entry = {
@@ -765,7 +759,8 @@ record_history_entry() {
 
   history.push(entry);
   fs.writeFileSync(pendingFile, JSON.stringify(history, null, 2), "utf8");
-  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" "$latency_val" "$generation_id_val" 2>/dev/null || true
+  ' "$pending_file" "$model_name" "$status_val" "$notes_cnt" "$latency_val" "$generation_id_val" 2>&1 >/dev/null) || \
+    log_error "⚠️  Failed to persist history entry (model: ${model_name}, status: ${status_val}, latency: ${latency_val}s) — this record is lost, not delayed. ${node_error}"
 }
 
 flush_and_commit_history() {
