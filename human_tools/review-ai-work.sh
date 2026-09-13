@@ -360,13 +360,9 @@ all_launched_attempts_processed() {
 
 # Once a winning attempt exists, kill each still-running attempt once it
 # passes its own deadline: whichever is later of (a) ABORT_GRACE_SECONDS past
-# the win, or (b) STAGGER_SECONDS of the attempt's own runtime — the same
-# runway that justified hedging against it in the first place. Plain
-# ABORT_GRACE_SECONDS alone would shortchange a hedge attempt launched near
-# the STAGGER_SECONDS mark: e.g. attempt 1 taking 64s to succeed lets attempt
-# 2 (launched at 60s) run only ~34s before a flat 30s-post-win cutoff, well
-# under the 60s attempt 1 itself was allowed. Each attempt's deadline is
-# independent, so different stragglers can be killed on different ticks.
+# the win, or (b) STAGGER_SECONDS of the attempt's own runtime — so a hedge
+# attempt is never cut short before it's had as fair a shot as attempt 1 got.
+# Each attempt's deadline is independent, so stragglers can die on different ticks.
 maybe_abort_stragglers() {
   local now="$1"
   [ "$ANY_SUCCESS" = true ] || return 0
@@ -394,9 +390,7 @@ abort_and_record_straggler() {
   local pid gen_id model wait_latency
 
   # This is how long we waited before giving up, not the model's true
-  # generation time (which /generation could report but which we don't
-  # fetch here) — recorded anyway for visibility, but exclusion already
-  # treats this entry as a failure via status alone, regardless of the value.
+  # generation time — status already marks this a failure regardless.
   wait_latency=$(( $(date +%s) - LAUNCH_TS[$n] ))
 
   # Read the generation ID before killing anything: run_attempt deletes
@@ -503,8 +497,10 @@ fetch_generation_model() {
 }
 
 # Parses an OpenRouter response into a verdict, emitted as JSON on stdout:
-# {status, output, notes_count}. status is "" for anything that isn't a clean
-# LGTM/ACTION_REQUIRED verdict, including a non-200 response.
+# {status, output, notes_count}. A verdict is accepted as LGTM/ACTION_REQUIRED
+# either via the strict JSON schema, or — since some models ignore it — a
+# reply that's just the plain word LGTM. Anything else, including a non-200
+# response, yields status "".
 parse_review_verdict() {
   local http_code="$1"
   local response_tmpfile="$2"
@@ -523,8 +519,6 @@ parse_review_verdict() {
       notes_count=$(echo "$raw_content" | jq -r '.notes | length' 2>/dev/null || echo 0)
       ai_output="ACTION_REQUIRED"$'\n'"$(echo "$raw_content" | jq -r '.notes[]? | "- **" + (.rule // "Finding") + "** (`" + (.file // "unknown") + "`): " + (.text // .)' 2>/dev/null || echo "")"
     else
-      # Some models ignore the strict JSON schema and just reply with the plain
-      # word LGTM; accept that as a pass too instead of treating it as a failure.
       trimmed_content=$(echo "$raw_content" | sed '/^[[:space:]]*$/d' | head -n 1 | tr -d '\r' | xargs)
       if [ "$trimmed_content" = "LGTM" ]; then
         status_val="LGTM"
@@ -666,7 +660,9 @@ get_excluded_models() {
   const weekStart = now.getTime() - 7 * 24 * 60 * 60 * 1000;
   const monthStart = now.getTime() - 30 * 24 * 60 * 60 * 1000;
 
-  const isFailureEntry = (item) => item.status === "fail" || item.latency >= 60;
+  // A model counts against exclusion for an outright failure, or for a
+  // "success" that was too slow to be useful (>= 60s) to be worth much.
+  const countsAsExclusionFailure = (item) => item.status === "fail" || item.latency >= 60;
 
   const failures = {};
 
@@ -674,7 +670,7 @@ get_excluded_models() {
     // A failure recorded today always carries a model, at least "unknown" —
     // !item.model here excludes only the small set of existing entries from
     // before model attribution existed, which have no model to exclude by.
-    if (!isFailureEntry(item) || !item.model) continue;
+    if (!countsAsExclusionFailure(item) || !item.model) continue;
     const time = new Date(item.timestamp).getTime();
     if (isNaN(time)) continue;
 
