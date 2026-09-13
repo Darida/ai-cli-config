@@ -346,5 +346,11 @@
     "model": "nex-agi/nex-n2.5-mini:free",
     "status": "success",
     "notes_count": 1
+  },
+  {
+    "timestamp": "2026-09-13T18:47:22.693Z",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "status": "success",
+    "notes_count": 3
   }
 ]
