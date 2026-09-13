@@ -46,7 +46,8 @@ main() {
     echo -e "  ${GREEN}git -C \"$REPO_PATH\" push origin ai-work${NC}"
     exit 1
   fi
-  echo -e "${GREEN}✓ ai-work branch state is clean${NC}\n"
+  echo -e "${GREEN}✓ ai-work branch state is clean${NC}"
+  echo -e "  Preview: $(compare_url)\n"
 
   # 2. Close any existing old PRs from ai-work
   echo -e "${YELLOW}[2/8] Checking for and closing any existing PRs...${NC}"
@@ -189,6 +190,13 @@ main() {
   echo -e "${GREEN}✓ ai-work branch history reset and ready for new work${NC}"
 }
 
+compare_url() {
+  local remote_url org_repo
+  remote_url="$(git remote get-url origin)"
+  org_repo="$(echo "$remote_url" | sed -E 's#^git@github\.com:##; s#^https://github\.com/##; s#\.git$##')"
+  echo "https://github.com/$org_repo/compare/ai-work?expand=1"
+}
+
 extract_git_diff_for_approval() {
   local non_sent_image_extensions=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   local image_pathspecs=()
@@ -291,6 +299,7 @@ build_openrouter_payload() {
           schema: ($schema | fromjson)
         }
       },
+      provider: { require_parameters: true },
       reasoning: { exclude: true },
       messages: [{ role: "user", content: $text }]
     }'
