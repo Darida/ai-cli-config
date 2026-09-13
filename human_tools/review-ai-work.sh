@@ -144,9 +144,10 @@ main() {
   # Hedged-parallel attempts. Attempt 1 fires immediately; attempt N+1 fires as
   # soon as attempt N is either known-failed or has been pending STAGGER_SECONDS
   # with no response — whichever comes first. Once any attempt succeeds, no
-  # further attempt is launched, and any still in flight get ABORT_GRACE_SECONDS
-  # to finish on their own (they're still printed if they succeed in that
-  # window) before being killed. A killed attempt is always recorded as a
+  # further attempt is launched, and each attempt still in flight keeps running
+  # (still printed if it succeeds too) until it passes its own abort deadline —
+  # see maybe_abort_stragglers for why that's not simply ABORT_GRACE_SECONDS
+  # past the win for every attempt. A killed attempt is always recorded as a
   # failure — even if OpenRouter shows it completing successfully afterward,
   # it never delivered a usable result to this run — but its generation ID
   # (captured from response headers within seconds, long before slow
@@ -163,7 +164,6 @@ main() {
   declare -A LAUNCHED=() PROCESSED=() LAUNCH_TS=()
   ANY_SUCCESS=false
   SUCCESS_TS=""
-  STRAGGLERS_ABORTED=false
   OVERALL_STATUS=""
   FAILED_ATTEMPT_FILES=()
 
@@ -361,20 +361,29 @@ all_launched_attempts_processed() {
   return 0
 }
 
-# Once a winning attempt exists, give every still-running attempt
-# ABORT_GRACE_SECONDS to finish on its own before giving up on it for good.
+# Once a winning attempt exists, kill each still-running attempt once it
+# passes its own deadline: whichever is later of (a) ABORT_GRACE_SECONDS past
+# the win, or (b) STAGGER_SECONDS of the attempt's own runtime — the same
+# runway that justified hedging against it in the first place. Plain
+# ABORT_GRACE_SECONDS alone would shortchange a hedge attempt launched near
+# the STAGGER_SECONDS mark: e.g. attempt 1 taking 64s to succeed lets attempt
+# 2 (launched at 60s) run only ~34s before a flat 30s-post-win cutoff, well
+# under the 60s attempt 1 itself was allowed. Each attempt's deadline is
+# independent, so different stragglers can be killed on different ticks.
 maybe_abort_stragglers() {
   local now="$1"
   [ "$ANY_SUCCESS" = true ] || return 0
-  [ "$STRAGGLERS_ABORTED" = false ] || return 0
-  [ $((now - SUCCESS_TS)) -ge "$ABORT_GRACE_SECONDS" ] || return 0
 
-  STRAGGLERS_ABORTED=true
-  local n
+  local n deadline grace_deadline
+  grace_deadline=$((SUCCESS_TS + ABORT_GRACE_SECONDS))
   for n in 1 2 3; do
     if [ -n "${LAUNCHED[$n]:-}" ] && [ -z "${PROCESSED[$n]:-}" ]; then
-      abort_and_record_straggler "$n"
-      PROCESSED[$n]=1
+      deadline=$((LAUNCH_TS[$n] + STAGGER_SECONDS))
+      [ "$grace_deadline" -gt "$deadline" ] && deadline="$grace_deadline"
+      if [ "$now" -ge "$deadline" ]; then
+        abort_and_record_straggler "$n"
+        PROCESSED[$n]=1
+      fi
     fi
   done
 }
