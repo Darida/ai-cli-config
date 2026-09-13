@@ -7,6 +7,8 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+RULES_URL="https://github.com/Darida/ai-cli-config/blob/main/human_tools/review.prompt.md"
+
 main() {
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
   if [ -z "$OPENROUTER_API_KEY" ]; then
@@ -210,6 +212,7 @@ main() {
   log_success "✓ AI review complete (Result: ${STATUS})\n"
 
   log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
+  echo -e "  Rules: ${RULES_URL}"
   echo -e "${BLUE}======================================================${NC}"
   echo -e "$AI_OUTPUT"
   echo -e "${BLUE}======================================================${NC}"

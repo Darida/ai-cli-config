@@ -82,19 +82,20 @@ Comments in `.proto` files are public API documentation for external callers who
 - **Check ordering:** Validation of inputs/state must be the first thing a method does, before any other logic. Flag validation that appears after other statements have already executed.
 - **Check extraction:** If validating a single fact takes more than one line, that check must be extracted into a private helper named `validateXXX` placed at the end of the file. Two separate one-line assertions on two separate fields may stay inline in the method — each is its own single-line validation — but validation that loops over a collection/repeated field to assert something about its elements must be extracted into a helper regardless of line count.
 
-### Rule 10: Runtime Type Checks as Validation
+### Rule 10: Runtime Type Checks Only Belong at the External Parse Boundary
 - Inspect uses of `typeof`, `instanceof`, duck-typing, or other runtime type inspection in modified or added code.
-- **Languages without compile-time type checking** (e.g. JavaScript, Python, Ruby): such a check is a form of validation and falls under Rule 9's placement/extraction rules. Flag its use outside genuinely non-trivial situations — routine type-checking that a real type system would otherwise catch is unnecessary noise.
-- **Languages with compile-time type checking** (e.g. TypeScript, Go, Java, C#, Rust): flag any runtime type check as prohibited — the compiler already gives a stronger guarantee, so a runtime check is either redundant or a sign the static types are wrong.
+- **Allowed:** a type check performed while parsing/deserializing external input (an API response, request body, file, env var) into your own model, validating a raw field against its documented shape. The real shape is genuinely unverified at that point — even in a compile-time-typed language, even via a library that auto-builds an object from JSON — so this is legitimate validation, governed by Rule 9's placement rules, not the redundant check this rule targets.
+- **Prohibited everywhere else:** once a value is one of your own model objects, Rule 12 requires it to already be valid — flag any type check performed on it. Also flag a type check used as routine type-narrowing on values already inside your own codebase, in a language whose compiler could enforce that instead of a runtime check.
 
 ### Rule 11: No Backward-Compatibility Logic
 - Inspect diffs that redesign, rename, or change the shape of an existing method, type, or API.
 - **Check:** Flag any code kept solely to support old callers alongside the new approach — a legacy branch, a compatibility shim, or a fallback path for the old shape/signature. When a redesign happens, all callers must be updated to the new approach in the same change; old logic must not be left behind.
 - **Check for tells:** Pay particular attention to comments or code paths implying an old approach was left in place (e.g. a branch guarded by a flag/type check for "the old way," a comment referencing what used to happen). This overlaps with Rule 1's history-leak checks for comments, but here flag the retained *logic/code path* itself, not just a comment describing it.
 
-### Rule 12: Strongly-Typed Domain Models
-- Inspect modified or added function/method signatures and return types.
-- **Check:** Flag the use of tuples, generic objects/maps, or raw/untyped JSON as a domain model — a return type, a parameter representing a domain concept, or a field passed between layers. A dedicated model class, struct, or proto message (if the project uses protos) must be defined and used instead, even in languages with weak type systems, so the shape is named and strongly typed rather than passed around as an anonymous structure.
+### Rule 12: Strongly-Typed, Self-Validating Domain Models
+- Inspect modified or added function/method signatures, return types, and model class/struct definitions.
+- **Check the shape:** Flag the use of tuples, generic objects/maps, or raw/untyped JSON as a domain model — a return type, a parameter representing a domain concept, or a field passed between layers. A dedicated model class, struct, or proto message (if the project uses protos) must be defined and used instead, even in languages with weak type systems, so the shape is named and strongly typed rather than passed around as an anonymous structure.
+- **Check self-validation:** a model's constructor (or its setters, if mutable) must validate its own field values at creation. Flag a model that can hold an invalid value because validation happens later, elsewhere, or not at all — code that already holds one of your own model objects must be able to assume it's valid without re-checking it (see Rule 10).
 
 ### Rule 13: Explicit, Required Inputs
 - Inspect modified or added function/method signatures.
@@ -115,6 +116,7 @@ Comments in `.proto` files are public API documentation for external callers who
   - Do NOT include conversational preambles, intros, summaries, postambles, or safety meta-tags.
   - Do NOT describe, narrate, or list what a diff changed, added, removed, or renamed. Every bullet must state a violation and where it is — never a summary of the change that introduced it.
   - If a bullet doesn't name a specific Rule 1-13 violation, it doesn't belong in the output at all, regardless of how accurate its description of the diff is.
+- **State the Why**: naming a rule is not enough. Each bullet must explain, in terms of the actual flagged code (its names, its condition, its behavior), why it violates the rule — not restate the rule's own wording as if that were the explanation.
 - **Generalize Repeated Issues**: If the exact same issue affects multiple files or locations, generalize the finding into a single note and list a few specific places as representative examples (e.g., `path/to/fileA.ts:L12`, `path/to/fileB.ts:L44`).
 - **File Field**: Each note's `file` field MUST be the repo-relative path of the single file most representative of that violation (no line numbers, no backticks). If a finding spans multiple files, put the primary one in `file` and name the rest in `text`.
 
