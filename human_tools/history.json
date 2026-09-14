@@ -534,5 +534,29 @@
     "notes_count": 0,
     "latency": 15,
     "generation_id": "gen-1789359229-mekUTMonB98Tt6f0wkAd"
+  },
+  {
+    "timestamp": "2026-09-14T05:20:42.244Z",
+    "model": "nex-agi/nex-n2.5-mini:free",
+    "status": "success",
+    "notes_count": 4,
+    "latency": 132,
+    "generation_id": "gen-1789363109-BO8Pj4gwU1d33AgD884H"
+  },
+  {
+    "timestamp": "2026-09-14T05:21:06.879Z",
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "status": "success",
+    "notes_count": 0,
+    "latency": 36,
+    "generation_id": "gen-1789363230-yQUBxB4mUwPVMy2VGuDZ"
+  },
+  {
+    "timestamp": "2026-09-14T05:21:19.019Z",
+    "model": "nex-agi/nex-n2.5-mini-20260908:free",
+    "status": "fail",
+    "notes_count": 0,
+    "latency": 103,
+    "generation_id": "gen-1789363169-DJDvVgorHzyaWoiMyW38"
   }
 ]
