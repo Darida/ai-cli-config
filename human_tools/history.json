@@ -630,5 +630,29 @@
     "notes_count": 0,
     "latency": 96,
     "generation_id": "gen-1789952650-YxnZaDKOw6nk0cItzAei"
+  },
+  {
+    "timestamp": "2026-09-21T01:13:48.216Z",
+    "model": "nvidia/nemotron-3-super-120b-a12b:free",
+    "status": "success",
+    "notes_count": 4,
+    "latency": 119,
+    "generation_id": "gen-1789953107-pRvmzt8fVc1XgrfvrvZh"
+  },
+  {
+    "timestamp": "2026-09-21T01:14:50.400Z",
+    "model": "unknown",
+    "status": "fail",
+    "notes_count": 0,
+    "latency": 91,
+    "generation_id": "gen-1789953167-EaUmg1HOJHh6quUbrrV7"
+  },
+  {
+    "timestamp": "2026-09-21T01:15:03.488Z",
+    "model": "nvidia/nemotron-3-super-120b-a12b-20230311:free",
+    "status": "fail",
+    "notes_count": 0,
+    "latency": 64,
+    "generation_id": "gen-1789953228-RLCsXrW3Z9LX2zgNuVV0"
   }
 ]
