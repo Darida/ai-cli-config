@@ -90,6 +90,7 @@ main() {
     --prompt="$PROMPT_TMPFILE" \
     --schema="$SCHEMA_FILE" \
     --schema-name="code_review_response" \
+    --tag=cl_review \
     --key="$OPENROUTER_API_KEY")
   STATUS=$(jq -r '.status' <<< "$REVIEW_CONTENT")
 

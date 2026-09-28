@@ -89,6 +89,7 @@ main() {
     --prompt="$PROMPT_TMPFILE" \
     --schema="$SCHEMA_FILE" \
     --schema-name="pr_description_response" \
+    --tag=cl_description \
     --key="$OPENROUTER_API_KEY")
   PR_TITLE=$(jq -r '.title' <<< "$PR_CONTENT")
   PR_DESCRIPTION=$(jq -r '.description' <<< "$PR_CONTENT")
