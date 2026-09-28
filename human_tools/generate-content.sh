@@ -1,6 +1,5 @@
 #!/bin/bash
-# Sends one prompt through the openrouterclient submodule's generate.sh and
-# prints only the schema-shaped content JSON on stdout; its logs go to stderr.
+# Runs openrouterclient's generate.sh and prints only the content JSON on stdout.
 set -euo pipefail
 
 main() {

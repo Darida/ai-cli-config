@@ -10,6 +10,7 @@ NC='\033[0m'
 RULES_URL="https://github.com/Darida/ai-cli-config/blob/main/human_tools/review.prompt.md"
 
 main() {
+  BASE_REF="${1:-}"
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
   if [ -z "$OPENROUTER_API_KEY" ]; then
     log_error "Error: OpenRouter API key not found for this project."
@@ -19,8 +20,6 @@ main() {
   fi
 
   log_info "=== AI Work Code Review ==="
-
-  BASE_REF="${1:-}"
 
   if [ -z "$BASE_REF" ]; then
     if git rev-parse --verify origin/main >/dev/null 2>&1; then
