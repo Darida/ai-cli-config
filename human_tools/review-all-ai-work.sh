@@ -67,15 +67,12 @@ main() {
         exit 1
     fi
 
-    wipe_pending_history_file
-    trap 'flush_and_commit_history "$SCRIPT_DIR/history.json"' EXIT
-
     FAILED_REPOS=()
 
     for name in "${SUBMODULES_TO_REVIEW[@]}"; do
         echo ""
         echo "=== Reviewing $name ==="
-        if ! (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@" --noflush); then
+        if ! (cd "$WORKSPACE_ROOT/$name" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT"); then
             FAILED_REPOS+=("$name")
         fi
     done
@@ -83,7 +80,7 @@ main() {
     if [ "$WORKSPACE_HAD_CHANGES" -ne 0 ]; then
         echo ""
         echo "=== Reviewing workspace root ==="
-        if ! (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT" "$@" --noflush); then
+        if ! (cd "$WORKSPACE_ROOT" && OPENROUTER_API_KEY="$WORKSPACE_KEY" "$REVIEW_SCRIPT"); then
             FAILED_REPOS+=("workspace root")
         fi
     fi
@@ -110,49 +107,6 @@ has_pending_changes() {
     local repo_path="$1"
     git -C "$repo_path" fetch origin main ai-work --quiet 2>/dev/null || true
     ! git -C "$repo_path" diff --quiet origin/main...origin/ai-work -- 2>/dev/null
-}
-
-flush_and_commit_history() {
-  local history_file="$1"
-  local pending_file="/tmp/review_history_pending.json"
-  local script_dir
-  script_dir="$(cd "$(dirname "$history_file")" && pwd)"
-
-  [ ! -f "$pending_file" ] && return 0
-
-  node -e '
-  const fs = require("fs");
-  const historyFile = process.argv[1];
-  const pendingFile = process.argv[2];
-  let history = [];
-  try {
-    if (fs.existsSync(historyFile)) {
-      history = JSON.parse(fs.readFileSync(historyFile, "utf8"));
-    }
-  } catch (e) {}
-
-  try {
-    if (fs.existsSync(pendingFile)) {
-      const pending = JSON.parse(fs.readFileSync(pendingFile, "utf8"));
-      if (Array.isArray(pending) && pending.length > 0) {
-        history = history.concat(pending);
-        fs.writeFileSync(historyFile, JSON.stringify(history, null, 2), "utf8");
-      }
-      fs.unlinkSync(pendingFile);
-    }
-  } catch (e) {}
-  ' "$history_file" "$pending_file" 2>/dev/null || true
-
-  if git -C "$script_dir" status --porcelain "$history_file" 2>/dev/null | grep -q .; then
-    git -C "$script_dir" add "$history_file" 2>/dev/null || true
-    if git -C "$script_dir" commit -m "chore(history): update AI review history log" 2>/dev/null; then
-      git -C "$script_dir" push origin ai-work 2>/dev/null || true
-    fi
-  fi
-}
-
-wipe_pending_history_file() {
-  rm -f "/tmp/review_history_pending.json"
 }
 
 main "$@"

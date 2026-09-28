@@ -80,32 +80,19 @@ main() {
   PROMPT_CONTENT=$(cat "$PROMPT_FILE")
   PROMPT_CONTENT="${PROMPT_CONTENT//\{DIFF_CONTENT\}/$DIFF_CONTENT}"
 
-  log_info "  - Calling AI API (OpenRouter)..."
+  log_info "  - Calling AI API (OpenRouter via openrouterclient)..."
   PROMPT_TMPFILE="$(mktemp)"
-  PAYLOAD_TMPFILE="$(mktemp)"
-  trap 'rm -f "$PROMPT_TMPFILE" "$PAYLOAD_TMPFILE"' EXIT
+  trap 'rm -f "$PROMPT_TMPFILE"' EXIT
   printf '%s' "$PROMPT_CONTENT" > "$PROMPT_TMPFILE"
 
-  MODEL_NAME="openrouter/free"
-  PROMPT_SIZE_BYTES=$(wc -c < "$PROMPT_TMPFILE" | tr -d ' ')
-  PROMPT_SIZE_LIMIT_BYTES=$((50 * 1024))
-  if [ "$PROMPT_SIZE_BYTES" -gt "$PROMPT_SIZE_LIMIT_BYTES" ]; then
-    log_info "Warning: formatted prompt is $((PROMPT_SIZE_BYTES / 1024))KB, over the 50KB threshold."
-    log_info "A paid model (openrouter/auto) will be used for this PR description."
-    read -p "Send it to the OpenRouter API anyway? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      log_error "Aborted before sending request."
-      exit 1
-    fi
-    MODEL_NAME="openrouter/auto"
-  fi
-
-  build_openrouter_payload "$PROMPT_TMPFILE" "$SCHEMA_FILE" "$MODEL_NAME" > "$PAYLOAD_TMPFILE"
-
-  PR_TITLE=""
-  PR_DESCRIPTION=""
-  execute_approval_retries "$PAYLOAD_TMPFILE" "$MODEL_NAME" "$OPENROUTER_API_KEY"
+  PR_CONTENT=$("$SCRIPT_DIR/generate-content.sh" \
+    --prompt="$PROMPT_TMPFILE" \
+    --schema="$SCHEMA_FILE" \
+    --schema-name="pr_description_response" \
+    --tag=cl_description \
+    --key="$OPENROUTER_API_KEY")
+  PR_TITLE=$(jq -r '.title' <<< "$PR_CONTENT")
+  PR_DESCRIPTION=$(jq -r '.description' <<< "$PR_CONTENT")
 
   log_success "✓ PR title and description generated\n"
 
@@ -220,90 +207,6 @@ extract_git_diff_for_approval() {
   fi
 
   echo "$diff_content"
-}
-
-execute_approval_retries() {
-  local payload_tmpfile="$1"
-  local model_name="$2"
-  local api_key="$3"
-
-  local max_retries=3
-  local attempt=1
-  local failed_attempt_files=()
-
-  while [ "$attempt" -le "$max_retries" ]; do
-    local response_tmpfile
-    response_tmpfile=$(mktemp "/tmp/approve_attempt_${attempt}_XXXXXX.json")
-
-    if [ "$attempt" -gt 1 ]; then
-      log_info "[Attempt $attempt/$max_retries] Retrying API call to OpenRouter (${model_name})..."
-    else
-      log_info "Sending request to OpenRouter API (${model_name})..."
-    fi
-
-    local http_code
-    http_code=$(curl -s -w "%{http_code}" -o "$response_tmpfile" --connect-timeout 15 --max-time 240 -X POST "https://openrouter.ai/api/v1/chat/completions" \
-      -H "Authorization: Bearer ${api_key}" \
-      -H "Content-Type: application/json" \
-      --data-binary "@$payload_tmpfile" || echo "000")
-
-    http_code=$(echo "$http_code" | tr -d '\r\n[:space:]' | tail -c 3)
-    [ -z "$http_code" ] && http_code="000"
-
-    local raw_content
-    raw_content=$(jq -r '.choices[0].message.content // .choices[0].message.reasoning // empty' "$response_tmpfile" 2>/dev/null || echo "")
-
-    local parsed_title
-    parsed_title=$(echo "$raw_content" | jq -r '.title // empty' 2>/dev/null || echo "")
-    local parsed_desc
-    parsed_desc=$(echo "$raw_content" | jq -r '.description // empty' 2>/dev/null || echo "")
-
-    if [ "$http_code" = "200" ] && [ -n "$parsed_title" ] && [ -n "$parsed_desc" ]; then
-      PR_TITLE="$parsed_title"
-      PR_DESCRIPTION="$parsed_desc"
-      rm -f "$response_tmpfile"
-      return 0
-    fi
-
-    failed_attempt_files+=("$response_tmpfile")
-    log_error "[ERROR] Attempt $attempt/$max_retries failed (HTTP Status: ${http_code}). Debug file: file://${response_tmpfile}"
-
-    attempt=$((attempt + 1))
-    sleep 1
-  done
-
-  log_error "Error: Failed to obtain valid PR title and description after $max_retries attempts."
-  log_error "Preserved attempt debug files:"
-  for f in "${failed_attempt_files[@]}"; do
-    log_error "  - file://${f}"
-  done
-  exit 1
-}
-
-build_openrouter_payload() {
-  local prompt_file="$1"
-  local schema_file="$2"
-  local model_name="$3"
-
-  # https://openrouter.ai/docs/client-sdks/python/components/preferredmaxlatency
-  jq -n \
-    --rawfile text "$prompt_file" \
-    --rawfile schema "$schema_file" \
-    --arg model "$model_name" \
-    '{
-      model: $model,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "pr_description_response",
-          strict: true,
-          schema: ($schema | fromjson)
-        }
-      },
-      provider: { require_parameters: true, preferred_max_latency: 30 },
-      reasoning: { exclude: true, effort: "low" },
-      messages: [{ role: "user", content: $text }]
-    }'
 }
 
 format_uncommitted_changes_summary() {
