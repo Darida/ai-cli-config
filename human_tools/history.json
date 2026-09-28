@@ -870,5 +870,21 @@
     "notes_count": 3,
     "latency": 149,
     "generation_id": "gen-1790615482-Fdxg5J4wE3TwW3WoY6u2"
+  },
+  {
+    "timestamp": "2026-09-28T17:21:13.299Z",
+    "model": "liquid/lfm-2.5-2.6b:free",
+    "status": "success",
+    "notes_count": 0,
+    "latency": 101,
+    "generation_id": "gen-1790615971-qsgVtpwkveB09xwsK9py"
+  },
+  {
+    "timestamp": "2026-09-28T17:22:15.359Z",
+    "model": "unknown",
+    "status": "fail",
+    "notes_count": 0,
+    "latency": 72,
+    "generation_id": "gen-1790616031-T3bATVl1BSmLuHFoGawk"
   }
 ]
