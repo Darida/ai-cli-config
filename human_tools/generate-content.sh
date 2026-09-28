@@ -4,6 +4,7 @@ set -euo pipefail
 
 main() {
   local prompt_file="" schema_file="" schema_name="" tag="" api_key=""
+  local paid_args=()
   for arg in "$@"; do
     case "$arg" in
       --prompt=*) prompt_file="${arg#*=}" ;;
@@ -11,11 +12,12 @@ main() {
       --schema-name=*) schema_name="${arg#*=}" ;;
       --tag=*) tag="${arg#*=}" ;;
       --key=*) api_key="${arg#*=}" ;;
+      --paid) paid_args=(--paid) ;;
       *) echo "generate-content: unknown argument: $arg" >&2; exit 2 ;;
     esac
   done
   if [ -z "$prompt_file" ] || [ -z "$schema_file" ] || [ -z "$schema_name" ] || [ -z "$tag" ] || [ -z "$api_key" ]; then
-    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key>" >&2
+    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key> [--paid]" >&2
     exit 2
   fi
 
@@ -52,7 +54,7 @@ main() {
       targetQuality: "high"
     }' > "$requirements_file"
 
-  "$generate_script" --key="$api_key" --tag="$tag" "$requirements_file" > "$result_file"
+  "$generate_script" --key="$api_key" --tag="$tag" "${paid_args[@]}" "$requirements_file" > "$result_file"
   jq -e '.Content' "$result_file"
 }
 

@@ -10,7 +10,21 @@ NC='\033[0m'
 RULES_URL="https://github.com/Darida/ai-cli-config/blob/main/human_tools/review.prompt.md"
 
 main() {
-  BASE_REF="${1:-}"
+  BASE_REF=""
+  PAID_ARGS=()
+  for arg in "$@"; do
+    case "$arg" in
+      --paid) PAID_ARGS=(--paid) ;;
+      -*) log_error "Error: unknown option: $arg"; exit 2 ;;
+      *)
+        if [ -n "$BASE_REF" ]; then
+          log_error "Error: unexpected extra argument: $arg"
+          exit 2
+        fi
+        BASE_REF="$arg"
+        ;;
+    esac
+  done
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
   if [ -z "$OPENROUTER_API_KEY" ]; then
     log_error "Error: OpenRouter API key not found for this project."
@@ -90,7 +104,8 @@ main() {
     --schema="$SCHEMA_FILE" \
     --schema-name="code_review_response" \
     --tag=cl_review \
-    --key="$OPENROUTER_API_KEY")
+    --key="$OPENROUTER_API_KEY" \
+    "${PAID_ARGS[@]}")
   STATUS=$(jq -r '.status' <<< "$REVIEW_CONTENT")
 
   log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
