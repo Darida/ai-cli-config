@@ -20,14 +20,19 @@ main() {
     exit 2
   fi
 
-  local script_dir generate_script
+  local script_dir library_dir generate_script
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  generate_script="$script_dir/openrouterclient/bin/generate.sh"
-  if [ ! -x "$generate_script" ]; then
-    echo "generate-content: $generate_script not found. Initialize the submodule with:" >&2
+  library_dir="$script_dir/openrouterclient"
+  generate_script="$library_dir/bin/generate.sh"
+  if [ ! -e "$library_dir/.git" ]; then
+    echo "generate-content: $library_dir is not initialized. Initialize the submodule with:" >&2
     echo "  git -C \"$script_dir\" submodule update --init openrouterclient" >&2
     exit 1
   fi
+  # Always runs the library's latest main; .gitmodules sets ignore = all so
+  # this moving checkout never shows up as an uncommitted change here.
+  git -C "$library_dir" fetch --quiet origin main
+  git -C "$library_dir" checkout --quiet --detach origin/main
 
   local requirements_file result_file
   requirements_file="$(mktemp --suffix=.json)"

@@ -1,3 +1,5 @@
 [submodule "human_tools/openrouterclient"]
 	path = human_tools/openrouterclient
 	url = https://github.com/Darida/openrouterclient.git
+	branch = main
+	ignore = all
