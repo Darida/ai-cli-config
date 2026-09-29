@@ -5,6 +5,11 @@
   "permissions": {
     "allow": [
       "Bash(git *)",
+      "Bash(go doc *)",
+      "Bash(git/push-all)",
+      "Bash(git/push-all *)",
+      "Bash(./git/push-all)",
+      "Bash(./git/push-all *)",
       "Bash(go mod *)",
       "Bash(go test *)",
       "Bash(git pull *)",
@@ -58,5 +63,33 @@
   "theme": "dark",
   "verbose": true,
   "remoteControlAtStartup": true,
-  "useAutoModeDuringPlan": true
+  "useAutoModeDuringPlan": true,
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: None configured",
+      "**Repository visibility**: repos under github.com:Darida/* may be PUBLIC — pushing there is publishing, but it is the owner's own trusted account",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: None configured",
+      "**Default / protected branches**: main is the default branch; no protected branches — normal pushes are fine, avoid force-pushing main",
+      "**CI/CD deploy targets**: None configured",
+      "**Network posture**: None configured",
+      "**Host containment**: isolated, disposable hobby VM — nothing on the host is sensitive; local destructive actions are acceptable",
+      "**Source control**: every repo under github.com:Darida/* is trusted",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: openrouter.ai (contacted 8× in project transcripts)",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: any file or store holding personal data, confidential business data, credentials, regulated data, or similarly sensitive material; preserve exact handles when known and share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development",
+      "**Trusted repos**: all of github.com:Darida/* (e.g. ai-cli-config, openrouterclient); moving content between these repos is fine",
+      "**Org-specific CLIs**: None configured"
+    ]
+  }
 }
