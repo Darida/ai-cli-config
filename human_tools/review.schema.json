@@ -4,10 +4,12 @@
   "properties": {
     "status": {
       "type": "string",
-      "enum": ["LGTM", "ACTION_REQUIRED"]
+      "enum": ["LGTM", "ACTION_REQUIRED"],
+      "description": "LGTM if notes is empty; ACTION_REQUIRED if notes has at least one violation."
     },
     "notes": {
       "type": "array",
+      "description": "One entry per rule violation. Empty when status is LGTM.",
       "items": {
         "type": "object",
         "properties": {
@@ -21,7 +23,7 @@
           },
           "text": {
             "type": "string",
-            "description": "Actionable finding description"
+            "description": "At most 2 sentences (about 50 words): where the violation is, and why that code violates the rule. A final verdict only: no reasoning, reconsidering, or hedging. If unsure it is a violation, omit the note instead."
           }
         },
         "required": ["rule", "file", "text"],
