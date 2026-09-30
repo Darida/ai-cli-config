@@ -40,7 +40,11 @@ repo's README for model choice, retries, exclusion and history). It passes
 empty validation rules, so the library returns its first schema-valid
 output without a review round, and prints only that content JSON on
 stdout. `--paid` on review/approve is passed through to `generate.sh`,
-switching it from free to paid models. Before every call it fetches and checks out the library's latest
+switching it from free to paid models. `--exclude-models=<file>` passes
+the file's model IDs (one per line, `#` comments) as the request's
+`excludedModels`; review passes `review.excluded-models.txt` on `--paid`
+runs only, since it lists paid IDs and the library panics on any ID
+outside the request's tier. Before every call it fetches and checks out the library's latest
 `origin/main`; `.gitmodules` sets `ignore = all`, so the committed
 submodule pin is only a starting point and goes stale by design. The
 submodule must be initialized
