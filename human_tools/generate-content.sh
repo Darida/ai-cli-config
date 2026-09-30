@@ -3,7 +3,7 @@
 set -euo pipefail
 
 main() {
-  local prompt_file="" schema_file="" schema_name="" tag="" api_key=""
+  local prompt_file="" schema_file="" schema_name="" tag="" api_key="" excluded_models_file=""
   local paid_args=()
   for arg in "$@"; do
     case "$arg" in
@@ -12,12 +12,13 @@ main() {
       --schema-name=*) schema_name="${arg#*=}" ;;
       --tag=*) tag="${arg#*=}" ;;
       --key=*) api_key="${arg#*=}" ;;
+      --exclude-models=*) excluded_models_file="${arg#*=}" ;;
       --paid) paid_args=(--paid) ;;
       *) echo "generate-content: unknown argument: $arg" >&2; exit 2 ;;
     esac
   done
   if [ -z "$prompt_file" ] || [ -z "$schema_file" ] || [ -z "$schema_name" ] || [ -z "$tag" ] || [ -z "$api_key" ]; then
-    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key> [--paid]" >&2
+    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key> [--paid] [--exclude-models=<file>]" >&2
     exit 2
   fi
 
@@ -35,6 +36,12 @@ main() {
   git -C "$library_dir" fetch --quiet origin main
   git -C "$library_dir" checkout --quiet --detach origin/main
 
+  local excluded_models_json="[]"
+  if [ -n "$excluded_models_file" ]; then
+    # One model ID per line; "#" starts a comment, blank lines are skipped.
+    excluded_models_json="$(sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$excluded_models_file" | jq -R . | jq -s .)"
+  fi
+
   local requirements_file result_file
   requirements_file="$(mktemp --suffix=.json)"
   result_file="$(mktemp --suffix=.json)"
@@ -47,11 +54,13 @@ main() {
     --rawfile prompt "$prompt_file" \
     --rawfile schema "$schema_file" \
     --arg name "$schema_name" \
+    --argjson excludedModels "$excluded_models_json" \
     '{
       prompt: $prompt,
       outputSchema: { name: $name, schema: ($schema | fromjson) },
       outputValidationRules: "",
-      targetQuality: "high"
+      targetQuality: "high",
+      excludedModels: $excludedModels
     }' > "$requirements_file"
 
   "$generate_script" --key="$api_key" --tag="$tag" "${paid_args[@]}" "$requirements_file" > "$result_file"

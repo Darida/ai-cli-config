@@ -14,7 +14,8 @@ main() {
   PAID_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      --paid) PAID_ARGS=(--paid) ;;
+      # The list holds paid model IDs only; the library panics on IDs outside the request's tier.
+      --paid) PAID_ARGS=(--paid "--exclude-models=$(dirname "${BASH_SOURCE[0]}")/review.excluded-models.txt") ;;
       -*) log_error "Error: unknown option: $arg"; exit 2 ;;
       *)
         if [ -n "$BASE_REF" ]; then
