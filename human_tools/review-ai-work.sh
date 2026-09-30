@@ -155,8 +155,8 @@ extract_git_diff() {
   diff_content=$(git --no-pager diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "${md_pathspecs[@]}" 2>/dev/null || echo "")
 
   if [ -n "$diff_content" ]; then
-    diff_content=$(node -e '
-    const raw = process.argv[1];
+    diff_content=$(printf "%s" "$diff_content" | node -e '
+    const raw = require("fs").readFileSync(0, "utf8");
     const lines = raw.split("\n");
     const out = [];
     let count = 0;
@@ -178,7 +178,7 @@ extract_git_diff() {
     }
     flush();
     console.log(out.join("\n"));
-    ' "$diff_content")
+    ')
   fi
 
   local deleted_files
