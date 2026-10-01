@@ -48,8 +48,7 @@ main() {
   # Expanded now: the EXIT trap runs after main returns, when these locals are gone.
   trap "rm -f '$requirements_file' '$result_file'" EXIT
 
-  # Empty validation rules make the library skip its review/correction loop,
-  # so targetQuality is required but never compared against.
+  # generate.sh never reviews, so targetQuality is required but never compared against.
   jq -n \
     --rawfile prompt "$prompt_file" \
     --rawfile schema "$schema_file" \
@@ -58,7 +57,6 @@ main() {
     '{
       prompt: $prompt,
       outputSchema: { name: $name, schema: ($schema | fromjson) },
-      outputValidationRules: "",
       targetQuality: "high",
       excludedModels: $excludedModels
     }' > "$requirements_file"
