@@ -195,12 +195,15 @@ extract_git_diff_for_approval() {
   for pattern in "${non_sent_image_extensions[@]}"; do
     image_pathspecs+=(":!${pattern}")
   done
+  # Generated code is sometimes committed to the repo; it doesn't need review, so send filenames only.
+  local generated_dirs='**/gen/**'
+  local generated_pathspec=":(exclude,glob)${generated_dirs}"
 
   local diff_content
-  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}")
+  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec")
 
   local deleted_files
-  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}")
+  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec")
   if [ -n "$deleted_files" ]; then
     diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
@@ -209,6 +212,12 @@ extract_git_diff_for_approval() {
   changed_images=$(git diff --name-only origin/main...HEAD -- "${non_sent_image_extensions[@]}")
   if [ -n "$changed_images" ]; then
     diff_content="${diff_content}"$'\n\n'"Image files changed (contents omitted, filenames only):"$'\n'"${changed_images}"
+  fi
+
+  local changed_generated
+  changed_generated=$(git diff --name-only origin/main...HEAD -- ":(glob)${generated_dirs}")
+  if [ -n "$changed_generated" ]; then
+    diff_content="${diff_content}"$'\n\n'"Generated files changed (contents omitted, filenames only):"$'\n'"${changed_generated}"
   fi
 
   echo "$diff_content"
