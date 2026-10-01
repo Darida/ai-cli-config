@@ -9,11 +9,14 @@
       "command(git status)",
       "command(git mv)",
       "command(git diff)",
+      "command(git grep)",
+      "command(git log)",
       "command(git/push-all)",
       "command(./git/push-all)",
       "command(go mod)",
       "command(go test)",
       "command(cat)",
+      "command(ls)",
       "read_file(//tmp/**)"
     ],
     "deny": [
