@@ -16,7 +16,7 @@ A streamlined automation script (`approve-ai-work.sh`) designed to clean up, sum
 After your AI agent finishes a task on the `ai-work` branch, preview diff in GitHub Web UI, then run:
 
 ```bash
-./approve-ai-work.sh [--paid] # key from $OPENROUTER_API_KEY or `git config openrouter.githubapikey`
+./approve-ai-work.sh # key from $OPENROUTER_API_KEY or `git config openrouter.githubapikey`
 ```
 
 ## AI Code Review Tool: review-ai-work.sh
@@ -29,22 +29,18 @@ An automated AI review tool (`review-ai-work.sh`) that evaluates the current git
 
 Usage:
 ```bash
-./review-ai-work.sh [base_branch] [--paid] # Optional base branch, defaults to origin/main
+./review-ai-work.sh [base_branch] # Optional base branch, defaults to origin/main
 ```
 
 ## LLM calls: generate-content.sh
 
 Both review and approve send their prompt through `generate-content.sh`,
 which wraps the `openrouterclient` submodule's `bin/generate.sh` (see that
-repo's README for model choice, retries, exclusion and history). It passes
-empty validation rules, so the library returns its first schema-valid
-output without a review round, and prints only that content JSON on
-stdout. `--paid` on review/approve is passed through to `generate.sh`,
-switching it from free to paid models. `--exclude-models=<file>` passes
-the file's model IDs (one per line, `#` comments) as the request's
-`excludedModels`; review passes `review.excluded-models.txt` on `--paid`
-runs only, since it lists paid IDs and the library panics on any ID
-outside the request's tier. Before every call it fetches and checks out the library's latest
+repo's README for model choice, retries, exclusion and history), which
+never reviews, and prints only the generated content JSON on stdout.
+`--exclude-models=<file>` passes the file's model IDs (one per line, `#`
+comments) as the request's `excludedModels`; review always passes
+`review.excluded-models.txt`. Before every call it fetches and checks out the library's latest
 `origin/main`; `.gitmodules` sets `ignore = all`, so the committed
 submodule pin is only a starting point and goes stale by design. The
 submodule must be initialized

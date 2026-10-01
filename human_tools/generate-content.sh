@@ -4,7 +4,6 @@ set -euo pipefail
 
 main() {
   local prompt_file="" schema_file="" schema_name="" tag="" api_key="" excluded_models_file=""
-  local paid_args=()
   for arg in "$@"; do
     case "$arg" in
       --prompt=*) prompt_file="${arg#*=}" ;;
@@ -13,12 +12,11 @@ main() {
       --tag=*) tag="${arg#*=}" ;;
       --key=*) api_key="${arg#*=}" ;;
       --exclude-models=*) excluded_models_file="${arg#*=}" ;;
-      --paid) paid_args=(--paid) ;;
       *) echo "generate-content: unknown argument: $arg" >&2; exit 2 ;;
     esac
   done
   if [ -z "$prompt_file" ] || [ -z "$schema_file" ] || [ -z "$schema_name" ] || [ -z "$tag" ] || [ -z "$api_key" ]; then
-    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key> [--paid] [--exclude-models=<file>]" >&2
+    echo "usage: generate-content.sh --prompt=<file> --schema=<file> --schema-name=<name> --tag=<tag> --key=<openrouter key> [--exclude-models=<file>]" >&2
     exit 2
   fi
 
@@ -61,7 +59,7 @@ main() {
       excludedModels: $excludedModels
     }' > "$requirements_file"
 
-  "$generate_script" --key="$api_key" --tag="$tag" "${paid_args[@]}" "$requirements_file" > "$result_file"
+  "$generate_script" --key="$api_key" --tag="$tag" "$requirements_file" > "$result_file"
   jq -e '.Content' "$result_file"
 }
 

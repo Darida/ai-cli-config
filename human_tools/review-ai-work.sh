@@ -11,11 +11,8 @@ RULES_URL="https://github.com/Darida/ai-cli-config/blob/main/human_tools/review.
 
 main() {
   BASE_REF=""
-  PAID_ARGS=()
   for arg in "$@"; do
     case "$arg" in
-      # The list holds paid model IDs only; the library panics on IDs outside the request's tier.
-      --paid) PAID_ARGS=(--paid "--exclude-models=$(dirname "${BASH_SOURCE[0]}")/review.excluded-models.txt") ;;
       -*) log_error "Error: unknown option: $arg"; exit 2 ;;
       *)
         if [ -n "$BASE_REF" ]; then
@@ -106,7 +103,7 @@ main() {
     --schema-name="code_review_response" \
     --tag=cl_review \
     --key="$OPENROUTER_API_KEY" \
-    "${PAID_ARGS[@]}")
+    --exclude-models="$SCRIPT_DIR/review.excluded-models.txt")
   STATUS=$(jq -r '.status' <<< "$REVIEW_CONTENT")
 
   log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
