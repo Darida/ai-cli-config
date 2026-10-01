@@ -8,12 +8,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 main() {
-  PAID_ARGS=()
   for arg in "$@"; do
-    case "$arg" in
-      --paid) PAID_ARGS=(--paid) ;;
-      *) log_error "Error: unknown argument: $arg"; exit 2 ;;
-    esac
+    log_error "Error: unknown argument: $arg"
+    exit 2
   done
 
   OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(git config --get openrouter.githubapikey || echo "")}"
@@ -98,8 +95,7 @@ main() {
     --schema="$SCHEMA_FILE" \
     --schema-name="pr_description_response" \
     --tag=cl_description \
-    --key="$OPENROUTER_API_KEY" \
-    "${PAID_ARGS[@]}")
+    --key="$OPENROUTER_API_KEY")
   PR_TITLE=$(jq -r '.title' <<< "$PR_CONTENT")
   PR_DESCRIPTION=$(jq -r '.description' <<< "$PR_CONTENT")
 
