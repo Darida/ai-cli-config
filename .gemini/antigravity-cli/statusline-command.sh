@@ -20,21 +20,30 @@ cache_dir="$HOME/.claude/.cache"
 diff_ttl=120
 
 main() {
-  local model_display ctx_pct quota_used reset_in project_dir
-  IFS=$'\t' read -r model_display ctx_pct quota_used reset_in project_dir < <(jq -r '
-    (.model.id // "") as $m
-    | [ (.model.display_name // .model.id // "unknown"),
-        (.context_window.used_percentage // "" | if . == "" then . else round end),
-        (.quota[$m].remaining_fraction // "" | if . == "" then . else ((1 - .) * 100 | round) end),
-        (.quota[$m].reset_in_seconds // "" | if . == "" then . else floor end),
-        (.workspace.project_dir // .cwd // "") ]
-    | @tsv')
+  local model_display ctx_pct used_5h reset_5h used_7d reset_7d project_dir
+  # \x1f, not tab: read collapses runs of whitespace IFS, which would drop empty fields.
+  IFS=$'\x1f' read -r model_display ctx_pct used_5h reset_5h used_7d reset_7d project_dir < <(jq -r '
+    # Quota is bucketed by model family, not keyed by model id: gemini-* for
+    # Gemini models, 3p-* for third-party ones.
+    (if ((.model.id // "") | test("gemini"; "i")) then "gemini" else "3p" end) as $fam
+    | def used: if . == null then "" else ((1 - .) * 100 | round) end;
+      def secs: if . == null then "" else floor end;
+    [ (.model.display_name // .model.id // "unknown"),
+      (.context_window.used_percentage | if . == null then "" else round end),
+      (.quota["\($fam)-5h"].remaining_fraction | used),
+      (.quota["\($fam)-5h"].reset_in_seconds | secs),
+      (.quota["\($fam)-weekly"].remaining_fraction | used),
+      (.quota["\($fam)-weekly"].reset_in_seconds | secs),
+      (.workspace.project_dir // .cwd // "") ]
+    | map(tostring) | join("\u001f")')
 
   printf -v now '%(%s)T' -1
 
   local line ctx_str quota_str diff_str
   ctx_str=$(format_ctx "$ctx_pct")
-  quota_str=$(format_quota "$quota_used" "$reset_in")
+  quota_str=$(format_quota 5h "$used_5h" "$reset_5h")
+  quota_str="${quota_str:+$quota_str }$(format_quota 7d "$used_7d" "$reset_7d")"
+  quota_str="${quota_str% }"
   diff_str=$(get_branch_diff_str "$project_dir")
 
   line="${c_model}${model_display}${c_reset} ${c_sep} ${ctx_str}"
@@ -89,14 +98,14 @@ resolve_repo_coords() {
   printf '%s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]%.git}"
 }
 
-# Quota used for the current model, with time until reset.
+# One quota window's used %, with time until reset.
 format_quota() {
-  local used="$1" reset_in="$2" color seg
+  local label="$1" used="$2" reset_in="$3" color seg
   [ -n "$used" ] || return
   color="$c_green"
   (( used >= 70 )) && color="$c_yellow"
   (( used >= 90 )) && color="$c_red"
-  seg="Quota ${color}${used}%${c_reset}"
+  seg="${label} ${color}${used}%${c_reset}"
   [ -n "$reset_in" ] && seg="${seg}${c_dim} (resets $(fmt_duration "$reset_in"))${c_reset}"
   printf '%s' "$seg"
 }
