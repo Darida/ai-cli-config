@@ -1,5 +1,6 @@
 #!/bin/bash
-# Claude Code status line. The branch diff segment is queried live from the
+# Antigravity CLI status line (stdin schema: https://antigravity.google/docs/cli/statusline).
+# The branch diff segment is queried live from the
 # GitHub API rather than the local git tree, so it stays accurate even in a
 # sparse checkout where most files aren't present to diff locally.
 
@@ -24,7 +25,7 @@ main() {
   local model_display ctx_str rate_str diff_str line
   model_display=$(get_model_display)
   ctx_str=$(get_context_str)
-  rate_str=$(get_rate_limit_str)
+  rate_str=$(get_quota_str)
   diff_str=$(get_branch_diff_str)
 
   line="${c_model}${model_display}${c_reset} ${c_sep} ${ctx_str}"
@@ -45,6 +46,7 @@ get_branch_diff_str() {
 
   local cache_dir="$HOME/.claude/.cache"
   mkdir -p "$cache_dir" 2>/dev/null
+  # Same cache as the Claude Code status line, so both CLIs share one API call per TTL.
   local cache_file="${cache_dir}/statusline-diff-${owner}-${repo}-main-ai-work.cache"
   local ttl=120
 
@@ -68,61 +70,33 @@ get_branch_diff_str() {
   [ -f "$cache_file" ] && sed -n '2p' "$cache_file"
 }
 
-# Turn a raw model id like "claude-opus-4-5-20250929" into "Opus 4.5"
-format_model_id() {
-  local s="$1"
-  s="${s%-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]}"   # strip trailing -YYYYMMDD
-  s="${s#claude-}"                                      # strip leading "claude-"
-  local IFS='-'
-  local parts=()
-  read -ra parts <<< "$s"
-  local out="" prev_num=false p cap
-  for p in "${parts[@]}"; do
-    if [[ "$p" =~ ^[0-9]+$ ]]; then
-      if $prev_num; then out="${out}.${p}"; else out="${out} ${p}"; fi
-      prev_num=true
-    else
-      cap="$(tr '[:lower:]' '[:upper:]' <<< "${p:0:1}")${p:1}"
-      out="${out} ${cap}"
-      prev_num=false
-    fi
-  done
-  out="${out# }"
-  if [ -n "$out" ]; then echo "$out"; else echo "$1"; fi
+# Quota used for the current model, with time until reset. The payload gives
+# remaining_fraction per model id, so used% is its complement.
+get_quota_str() {
+  local model_id remaining pct_int color reset_in seg
+  model_id=$(echo "$input" | jq -r '.model.id // empty')
+  [ -n "$model_id" ] || return
+  remaining=$(echo "$input" | jq -r --arg m "$model_id" '.quota[$m].remaining_fraction // empty')
+  [ -n "$remaining" ] || return
+  pct_int=$(awk -v r="$remaining" 'BEGIN { printf "%.0f", (1 - r) * 100 }')
+  color="$c_green"
+  [ "$pct_int" -ge 70 ] && color="$c_yellow"
+  [ "$pct_int" -ge 90 ] && color="$c_red"
+  seg="Quota ${color}${pct_int}%${c_reset}"
+  reset_in=$(echo "$input" | jq -r --arg m "$model_id" '.quota[$m].reset_in_seconds // empty')
+  if [ -n "$reset_in" ]; then
+    seg="${seg}${c_dim} (resets $(fmt_remaining $(( $(date +%s) + ${reset_in%.*} ))))${c_reset}"
+  fi
+  echo "$seg"
 }
 
-# 5h / 7d rate-limit usage, each with time until reset.
-get_rate_limit_str() {
-  local window label pct pct_int color seg resets_at remaining rate_str=""
-  for window in five_hour seven_day; do
-    label="5h"; [ "$window" = "seven_day" ] && label="7d"
-    pct=$(echo "$input" | jq -r ".rate_limits.${window}.used_percentage // empty")
-    [ -z "$pct" ] || [ "$pct" = "null" ] && continue
-    pct_int=$(printf '%.0f' "$pct")
-    color="$c_green"
-    [ "$pct_int" -ge 70 ] && color="$c_yellow"
-    [ "$pct_int" -ge 90 ] && color="$c_red"
-    seg="${label} ${color}${pct_int}%${c_reset}"
-    resets_at=$(echo "$input" | jq -r ".rate_limits.${window}.resets_at // empty")
-    if [ -n "$resets_at" ] && [ "$resets_at" != "null" ]; then
-      remaining=$(fmt_remaining "$resets_at")
-      seg="${seg}${c_dim} (resets ${remaining})${c_reset}"
-    fi
-    if [ -n "$rate_str" ]; then rate_str="${rate_str} ${seg}"; else rate_str="${seg}"; fi
-  done
-  echo "$rate_str"
-}
-
-# Prints "owner repo host". Falls back to parsing the local git remote's URL
-# for the name only -- the diff itself always comes from a live API call.
+# Prints "owner repo host", parsed from the local git remote's URL (the
+# Antigravity payload has no repo coordinates) -- the diff itself always comes from a live API call.
 resolve_repo_coords() {
   local owner repo host project_dir remote_url parsed
-  owner=$(echo "$input" | jq -r '.workspace.repo.owner // empty')
-  repo=$(echo "$input" | jq -r '.workspace.repo.name // empty')
-  host=$(echo "$input" | jq -r '.workspace.repo.host // empty')
   project_dir=$(echo "$input" | jq -r '.workspace.project_dir // .cwd // empty')
 
-  if { [ -z "$owner" ] || [ -z "$repo" ]; } && [ -n "$project_dir" ] && have git; then
+  if [ -n "$project_dir" ] && have git; then
     remote_url=$(git -C "$project_dir" --no-optional-locks config --get remote.origin.url 2>/dev/null)
     if [ -n "$remote_url" ]; then
       parsed=$(echo "$remote_url" | sed -E 's#^git@([^:]+):#https://\1/#' | sed -E 's#\.git$##')
@@ -171,22 +145,9 @@ get_context_str() {
   fi
 }
 
-# Actual model in use, resolving auto-routing via the transcript.
+# Model shown in the Antigravity TUI.
 get_model_display() {
-  local transcript_path model_raw
-  transcript_path=$(echo "$input" | jq -r '.transcript_path // empty')
-  model_raw=""
-  if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
-    model_raw=$(tail -n 400 "$transcript_path" 2>/dev/null | jq -rs '
-      [.[] | select(.type=="assistant") | .message.model? // empty] | last // empty
-    ' 2>/dev/null)
-  fi
-
-  if [ -n "$model_raw" ] && [ "$model_raw" != "null" ]; then
-    format_model_id "$model_raw"
-  else
-    echo "$input" | jq -r '.model.display_name // .model.id // "unknown"'
-  fi
+  echo "$input" | jq -r '.model.display_name // .model.id // "unknown"'
 }
 
 # Returns 1 (no output) on a cache miss so callers can fall through to a live fetch.

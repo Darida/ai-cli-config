@@ -32,7 +32,8 @@
       "command(gcloud)"
     ]
   },
-  "trustedWorkspaces": [
-    "/home/daridagm/Critter-Genetics-Breeder-Workspace"
-  ]
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.gemini/antigravity-cli/statusline-command.sh"
+  }
 }
