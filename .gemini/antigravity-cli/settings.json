@@ -35,8 +35,5 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.gemini/antigravity-cli/statusline-command.sh"
-  },
-  "trustedWorkspaces": [
-    "/home/daridagm/Critter-Genetics-Breeder-Workspace"
-  ]
+  }
 }
