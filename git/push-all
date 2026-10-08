@@ -87,7 +87,21 @@ commit_and_push() {
     fi
 
     echo "🚀 $name: pushing $branch..."
+    local pushed_head
+    pushed_head="$(git -C "$repo" rev-parse HEAD)"
     git -C "$repo" push origin "$branch"
+
+    # Pre-push hooks may commit regenerated code after git has already
+    # fixed what this push sends, leaving those commits local-only.
+    if [ "$(git -C "$repo" rev-parse HEAD)" != "$pushed_head" ]; then
+        echo "🔁 $name: hooks added commits during push — pushing again..."
+        pushed_head="$(git -C "$repo" rev-parse HEAD)"
+        git -C "$repo" push origin "$branch"
+        if [ "$(git -C "$repo" rev-parse HEAD)" != "$pushed_head" ]; then
+            echo "❌ $name: hooks added commits again on re-push — generation isn't stable." >&2
+            exit 1
+        fi
+    fi
 }
 
 sync_remote_branch() {
