@@ -21,7 +21,11 @@ if [ ! -f "$REPO/go.mod" ]; then
 fi
 
 echo "🧪 go test ./..."
-if ! output="$(go -C "$REPO" test ./... -timeout 30s 2>&1)"; then
+START=$EPOCHREALTIME
+FAILED=
+output="$(go -C "$REPO" test ./... -timeout 30s 2>&1)" || FAILED=1
+echo "⏱️  go test took $(awk "BEGIN { printf \"%.1fs\", $EPOCHREALTIME - $START }")"
+if [ -n "$FAILED" ]; then
     echo "$output"
     echo ""
     echo "❌ Tests failed! Push aborted."

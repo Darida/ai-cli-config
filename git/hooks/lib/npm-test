@@ -21,7 +21,11 @@ if [ ! -f "$REPO/package.json" ]; then
 fi
 
 echo "🧪 npm test"
-if ! output="$(npm --prefix "$REPO" test 2>&1)"; then
+START=$EPOCHREALTIME
+FAILED=
+output="$(npm --prefix "$REPO" test 2>&1)" || FAILED=1
+echo "⏱️  npm test took $(awk "BEGIN { printf \"%.1fs\", $EPOCHREALTIME - $START }")"
+if [ -n "$FAILED" ]; then
     echo "$output"
     echo ""
     echo "❌ Tests failed! Push aborted."
