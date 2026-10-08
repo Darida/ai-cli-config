@@ -103,7 +103,7 @@ main() {
     --schema-name="code_review_response" \
     --tag=cl_review \
     --key="$OPENROUTER_API_KEY" \
-    --exclude-models="$SCRIPT_DIR/review.excluded-models.txt")
+    --min-intelligence-index=15)
   STATUS=$(jq -r '.status' <<< "$REVIEW_CONTENT")
 
   log_info "[3/3] AI Code Review Notes for Manual Reviewer:"
