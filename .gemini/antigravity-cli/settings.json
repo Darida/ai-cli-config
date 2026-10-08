@@ -17,6 +17,7 @@
       "command(go test)",
       "command(cat)",
       "command(ls)",
+      "command(find)",
       "read_file(//tmp/**)"
     ],
     "deny": [
