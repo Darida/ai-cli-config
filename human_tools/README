@@ -40,9 +40,9 @@ Both review and approve send their prompt through `generate-content.sh`,
 which wraps the `openrouterclient` submodule's `bin/generate.sh` (see that
 repo's README for model choice, retries, exclusion and history), which
 never reviews, and prints only the generated content JSON on stdout.
-`--exclude-models=<file>` passes the file's model IDs (one per line, `#`
-comments) as the request's `excludedModels`; review always passes
-`review.excluded-models.txt`. Before every call it fetches and checks out the library's latest
+The required `--min-intelligence-index=<0-100>` sets the request's
+`minIntelligenceIndex` (Artificial Analysis score; models without one are
+never asked): review passes 15, approve passes 10. Before every call it fetches and checks out the library's latest
 `origin/main`; `.gitmodules` sets `ignore = all`, so the committed
 submodule pin is only a starting point and goes stale by design. The
 submodule must be initialized
