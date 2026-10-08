@@ -42,7 +42,11 @@ rm -rf "${REPO:?}/$GEN_DIR"
 mkdir -p "$REPO/$GEN_DIR"
 
 echo "🧪 npm run $SCRIPT"
-if ! npm --prefix "$REPO" run "$SCRIPT"; then
+START=$EPOCHREALTIME
+FAILED=
+npm --prefix "$REPO" run "$SCRIPT" || FAILED=1
+echo "⏱️  npm run $SCRIPT took $(awk "BEGIN { printf \"%.1fs\", $EPOCHREALTIME - $START }")"
+if [ -n "$FAILED" ]; then
     echo "❌ npm run $SCRIPT failed!" >&2
     exit 1
 fi
