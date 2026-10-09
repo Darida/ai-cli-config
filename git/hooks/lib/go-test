@@ -4,6 +4,23 @@
 # aren't Go.
 set -e
 
+run_timed() {
+    local label="$1"
+    shift
+    local start=$EPOCHREALTIME
+    local failed=
+    local output
+    output="$("$@" 2>&1)" || failed=1
+    echo "⏱️  go test $label took $(awk "BEGIN { printf \"%.1fs\", $EPOCHREALTIME - $start }")"
+    if [ -n "$failed" ]; then
+        echo "$output"
+        echo ""
+        echo "❌ Tests failed! Push aborted."
+        echo "Fix the failing tests and try again."
+        exit 1
+    fi
+}
+
 for arg in "$@"; do
     case "$arg" in
         --repo=*) REPO="${arg#--repo=}" ;;
@@ -21,15 +38,8 @@ if [ ! -f "$REPO/go.mod" ]; then
 fi
 
 echo "🧪 go test ./..."
-START=$EPOCHREALTIME
-FAILED=
-output="$(go -C "$REPO" test ./... -timeout 30s 2>&1)" || FAILED=1
-echo "⏱️  go test took $(awk "BEGIN { printf \"%.1fs\", $EPOCHREALTIME - $START }")"
-if [ -n "$FAILED" ]; then
-    echo "$output"
-    echo ""
-    echo "❌ Tests failed! Push aborted."
-    echo "Fix the failing tests and try again."
-    exit 1
-fi
+# A no-test pass first compiles and links every test binary, so the real
+# pass afterward hits the build cache and its time is test execution only.
+run_timed build go -C "$REPO" test -run '^$' ./... -timeout 30s
+run_timed test go -C "$REPO" test ./... -timeout 30s
 echo "✓ Go tests passed"
