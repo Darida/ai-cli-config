@@ -18,7 +18,16 @@
       "command(cat)",
       "command(ls)",
       "command(find)",
-      "read_file(//tmp/**)"
+      "read_file(//tmp/**)",
+      "command(turbochat/push-patch.sh)",
+      "command(turbochat/fetch-world.sh)",
+      "command(grep)",
+      "command(sort)",
+      "command(head)",
+      "command(turbochat/show.sh)",
+      "command(jq)",
+      "command(echo)",
+      "command(turbochat/rules.sh)"
     ],
     "deny": [
       "command(cd)",
