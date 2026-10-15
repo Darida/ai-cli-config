@@ -91,22 +91,24 @@ format_model_id() {
   if [ -n "$out" ]; then echo "$out"; else echo "$1"; fi
 }
 
-# 5h / 7d rate-limit usage, each with time until reset.
+# 5h / 7d rate-limit usage, each with time until reset. Usage is colored by
+# pace: green while at or under the share of the window elapsed, yellow when
+# ahead of it, red when more than double it.
 get_rate_limit_str() {
-  local window label pct pct_int color seg resets_at remaining rate_str=""
+  local window label window_secs pct pct_int color seg resets_at remaining rate_str=""
   for window in five_hour seven_day; do
-    label="5h"; [ "$window" = "seven_day" ] && label="7d"
+    label="5h"; window_secs=18000
+    [ "$window" = "seven_day" ] && { label="7d"; window_secs=604800; }
     pct=$(echo "$input" | jq -r ".rate_limits.${window}.used_percentage // empty")
     [ -z "$pct" ] || [ "$pct" = "null" ] && continue
     pct_int=$(printf '%.0f' "$pct")
-    color="$c_green"
-    [ "$pct_int" -ge 70 ] && color="$c_yellow"
-    [ "$pct_int" -ge 90 ] && color="$c_red"
-    seg="${label} ${color}${pct_int}%${c_reset}"
     resets_at=$(echo "$input" | jq -r ".rate_limits.${window}.resets_at // empty")
     if [ -n "$resets_at" ] && [ "$resets_at" != "null" ]; then
+      color=$(pace_color "$pct_int" "$resets_at" "$window_secs")
       remaining=$(fmt_remaining "$resets_at")
-      seg="${seg}${c_dim} (resets ${remaining})${c_reset}"
+      seg="${label} ${color}${pct_int}%${c_reset}${c_dim} (resets ${remaining})${c_reset}"
+    else
+      seg="${label} ${pct_int}%"
     fi
     if [ -n "$rate_str" ]; then rate_str="${rate_str} ${seg}"; else rate_str="${seg}"; fi
   done
@@ -200,6 +202,18 @@ read_diff_cache() {
     return 0
   fi
   return 1
+}
+
+# Compares used % against elapsed % of the window, cross-multiplied to stay in integer math.
+pace_color() {
+  local pct_int="$1" resets_at="$2" window_secs="$3" elapsed used_scaled
+  elapsed=$(( window_secs - (resets_at - $(date +%s)) ))
+  [ "$elapsed" -lt 0 ] && elapsed=0
+  used_scaled=$(( pct_int * window_secs ))
+  if [ "$used_scaled" -gt $(( 2 * elapsed * 100 )) ]; then echo "$c_red"
+  elif [ "$used_scaled" -gt $(( elapsed * 100 )) ]; then echo "$c_yellow"
+  else echo "$c_green"
+  fi
 }
 
 fmt_remaining() {
