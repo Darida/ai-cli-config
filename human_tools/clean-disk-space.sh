@@ -25,6 +25,24 @@ else
   echo "skipped (no passwordless sudo)"
 fi
 
+section "journald retention (3 days, so the journal stops refilling the disk)"
+JOURNALD_DROPIN=/etc/systemd/journald.conf.d/retention.conf
+# MaxFileSec matters: journald only deletes whole files once their newest entry
+# expires, and files default to a month each, which would defeat a 3-day limit.
+JOURNALD_RETENTION="[Journal]
+MaxRetentionSec=3day
+MaxFileSec=1day"
+if [ "$HAVE_SUDO" != 1 ]; then
+  echo "skipped (no passwordless sudo)"
+elif [ -f "$JOURNALD_DROPIN" ] && [ "$(cat "$JOURNALD_DROPIN")" = "$JOURNALD_RETENTION" ]; then
+  echo "already set"
+else
+  sudo mkdir -p "$(dirname "$JOURNALD_DROPIN")" \
+    && echo "$JOURNALD_RETENTION" | sudo tee "$JOURNALD_DROPIN" >/dev/null \
+    && sudo systemctl restart systemd-journald \
+    && echo "set" || echo "failed"
+fi
+
 section "systemd journal (keep last 3 days)"
 if [ "$HAVE_SUDO" = 1 ]; then
   sudo journalctl --vacuum-time=3d && echo "ok" || echo "failed"
