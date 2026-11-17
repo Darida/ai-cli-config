@@ -114,9 +114,9 @@ version except the one `claude` on PATH resolves to. Never touches project
 source or git history. Steps needing root are skipped when passwordless
 `sudo` isn't available.
 
-It also switches `/etc/logrotate.d/rsyslog` to daily rotation (it already
-compresses), so syslog stops refilling the disk between runs; this is
-idempotent.
+It also caps log growth between runs, idempotently: `/etc/logrotate.d/rsyslog`
+switches to daily rotation (it already compresses), and a journald drop-in
+(`/etc/systemd/journald.conf.d/retention.conf`) keeps 3 days of journal.
 
 ```bash
 ./clean-disk-space.sh
