@@ -107,9 +107,16 @@ workspace root, as a submodule).
 
 Reclaims disk space on the VM by clearing regenerable data only: apt cache
 and autoremove, journal (keeps 3 days), syslog (rotated copy removed,
-active one truncated in place), `~/.cache`, `~/.npm`, and Go build and
-module caches. Never touches project source or git history. Steps needing
-root are skipped when passwordless `sudo` isn't available.
+active one truncated in place), `~/.cache` (includes the Go build cache, so
+the next Go build is slow once), `~/.npm`, Go module cache, Claude Code
+session temp files untouched for 3+ days, and every installed Claude Code
+version except the one `claude` on PATH resolves to. Never touches project
+source or git history. Steps needing root are skipped when passwordless
+`sudo` isn't available.
+
+It also switches `/etc/logrotate.d/rsyslog` to daily rotation (it already
+compresses), so syslog stops refilling the disk between runs; this is
+idempotent.
 
 ```bash
 ./clean-disk-space.sh
