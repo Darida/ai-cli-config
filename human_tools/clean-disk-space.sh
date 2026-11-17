@@ -68,6 +68,8 @@ else
 fi
 
 section "user cache directory (~/.cache/*)"
+# Includes the Go build cache (~/.cache/go-build) on purpose: one slow Go build
+# afterwards (~5 min) is an accepted price for a fully clean cache.
 rm -rf "${HOME:?}/.cache"/* && echo "ok" || echo "failed"
 
 section "npm cache (~/.npm/*)"
@@ -105,6 +107,7 @@ else
 fi
 
 section "go module cache (forces re-download of every dependency on next build)"
+# Kept despite the small gain (~150 MB): the one-time re-download is accepted.
 if command -v go >/dev/null 2>&1; then
   go clean -modcache && echo "ok" || echo "failed"
 else
