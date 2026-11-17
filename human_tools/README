@@ -102,3 +102,15 @@ across all of them in one go instead of `cd`-ing into each one by hand.
 Run from anywhere — it locates the workspace root relative to its own
 location (assumes this `ai-cli-config` checkout sits directly at the
 workspace root, as a submodule).
+
+## VM disk cleanup: clean-disk-space.sh
+
+Reclaims disk space on the VM by clearing regenerable data only: apt cache
+and autoremove, journal (keeps 3 days), syslog (rotated copy removed,
+active one truncated in place), `~/.cache`, `~/.npm`, and Go build and
+module caches. Never touches project source or git history. Steps needing
+root are skipped when passwordless `sudo` isn't available.
+
+```bash
+./clean-disk-space.sh
+```
