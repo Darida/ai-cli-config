@@ -7,6 +7,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# ~200K tokens at 4 chars/token, leaving room for the template and output in common context windows.
+MAX_DIFF_CHARS=800000
+TEST_GLOBS=('**/*_test.go' '**/*.test.*' '**/*.spec.*' '**/test_*.py' '**/*_test.py' '**/test/**' '**/tests/**' '**/__tests__/**' '**/testdata/**')
+
 main() {
   for arg in "$@"; do
     log_error "Error: unknown argument: $arg"
@@ -67,7 +71,16 @@ main() {
   echo ""
 
   log_info "[3/8] Generating PR title and description from diff..."
-  DIFF_CONTENT=$(extract_git_diff_for_approval)
+  DIFF_CONTENT=$(extract_git_diff_for_approval with_tests)
+  if [ "${#DIFF_CONTENT}" -gt "$MAX_DIFF_CHARS" ]; then
+    log_info "  - Diff is ${#DIFF_CONTENT} chars (limit ${MAX_DIFF_CHARS}); listing test files by filename only..."
+    DIFF_CONTENT=$(extract_git_diff_for_approval without_tests)
+    if [ "${#DIFF_CONTENT}" -gt "$MAX_DIFF_CHARS" ]; then
+      log_error "Error: Diff is ${#DIFF_CONTENT} chars even without test files (limit ${MAX_DIFF_CHARS}). Largest changes (added, deleted, file):"
+      git diff --numstat origin/main...HEAD | sort -k1,1nr | head -10 >&2
+      exit 1
+    fi
+  fi
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PROMPT_FILE="$SCRIPT_DIR/approve-ai-work.commit_description_promt.md"
@@ -191,6 +204,18 @@ compare_url() {
 }
 
 extract_git_diff_for_approval() {
+  local test_mode="$1"
+  case "$test_mode" in
+    with_tests|without_tests) ;;
+    *) log_error "extract_git_diff_for_approval: invalid mode: $test_mode" >&2; exit 2 ;;
+  esac
+  local test_pathspecs=() test_include_pathspecs=()
+  if [ "$test_mode" = without_tests ]; then
+    for glob in "${TEST_GLOBS[@]}"; do
+      test_pathspecs+=(":(exclude,glob)${glob}")
+      test_include_pathspecs+=(":(glob)${glob}")
+    done
+  fi
   local non_sent_image_extensions=('*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.bmp' '*.ico')
   local image_pathspecs=()
   for pattern in "${non_sent_image_extensions[@]}"; do
@@ -201,10 +226,10 @@ extract_git_diff_for_approval() {
   local generated_pathspec=":(exclude,glob)${generated_dirs}"
 
   local diff_content
-  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec")
+  diff_content=$(git diff --diff-filter=d origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec" "${test_pathspecs[@]}")
 
   local deleted_files
-  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec")
+  deleted_files=$(git diff --diff-filter=D --name-only origin/main...HEAD -- . ':!go.sum' "${image_pathspecs[@]}" "$generated_pathspec" "${test_pathspecs[@]}")
   if [ -n "$deleted_files" ]; then
     diff_content="${diff_content}"$'\n\n'"Deleted files (contents omitted, filenames only):"$'\n'"${deleted_files}"
   fi
@@ -219,6 +244,14 @@ extract_git_diff_for_approval() {
   changed_generated=$(git diff --name-only origin/main...HEAD -- ":(glob)${generated_dirs}")
   if [ -n "$changed_generated" ]; then
     diff_content="${diff_content}"$'\n\n'"Generated files changed (contents omitted, filenames only):"$'\n'"${changed_generated}"
+  fi
+
+  if [ "$test_mode" = without_tests ]; then
+    local changed_tests
+    changed_tests=$(git diff --name-only origin/main...HEAD -- "${test_include_pathspecs[@]}")
+    if [ -n "$changed_tests" ]; then
+      diff_content="${diff_content}"$'\n\n'"Test files changed (contents omitted to fit the diff size limit, filenames only):"$'\n'"${changed_tests}"
+    fi
   fi
 
   echo "$diff_content"
