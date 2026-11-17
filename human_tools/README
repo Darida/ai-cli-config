@@ -6,7 +6,7 @@ A streamlined automation script (`approve-ai-work.sh`) designed to clean up, sum
 
 1. **Validation & Sync Check:** Verifies that your working tree has no uncommitted changes and that `ai-work` hasn't diverged from `main`.
 2. **PR Cleanup:** Automatically closes any stale, open PRs from the `ai-work` branch.
-3. **AI Summarization:** Grabs the `git diff` (excluding `go.sum`; images and `gen/` directories at any depth are listed by filename only), lists test files by filename only if the diff exceeds 800K chars, and fails if it still does; injects it into `approve-ai-work.commit_description_promt.md`, and sends it through `generate-content.sh` to write a clean title and description.
+3. **AI Summarization:** Grabs the `git diff` (excluding `go.sum`; images and `gen/` directories at any depth are listed by filename only), lists test files by filename only if the diff exceeds 800K chars; injects it into `approve-ai-work.commit_description_promt.md`, and sends it through `generate-content.sh` to write a clean title and description.
 4. **Human-in-the-Loop Review:** Displays the generated PR title and description, then pauses to wait for your manual approval (`y/n`).
 5. **Automated Squash Merge:** Uses the GitHub CLI (`gh`) to create the PR, approve it, and squash-merge it into `main`.
 6. **Branch Reset:** Pulls the updated `main` branch, hard-resets local and remote `ai-work` history, and leaves you with a clean slate for the next task.

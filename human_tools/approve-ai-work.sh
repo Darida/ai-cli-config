@@ -75,11 +75,6 @@ main() {
   if [ "${#DIFF_CONTENT}" -gt "$MAX_DIFF_CHARS" ]; then
     log_info "  - Diff is ${#DIFF_CONTENT} chars (limit ${MAX_DIFF_CHARS}); listing test files by filename only..."
     DIFF_CONTENT=$(extract_git_diff_for_approval without_tests)
-    if [ "${#DIFF_CONTENT}" -gt "$MAX_DIFF_CHARS" ]; then
-      log_error "Error: Diff is ${#DIFF_CONTENT} chars even without test files (limit ${MAX_DIFF_CHARS}). Largest changes (added, deleted, file):"
-      git diff --numstat origin/main...HEAD | sort -k1,1nr | head -10 >&2
-      exit 1
-    fi
   fi
 
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
